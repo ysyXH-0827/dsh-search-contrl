@@ -84,23 +84,30 @@ try {
     Write-Host '  No API key found; safe to push.' -ForegroundColor Green
 
     Step '4/5' 'Creating repository (skipped if it exists)'
-    if ((Invoke-Native { gh repo view "$Owner/$RepoName" }) -ne 0) {
-        gh repo create $RepoName --public --source=. --remote=origin --push
+    $repoExists = (Invoke-Native { gh repo view "$Owner/$RepoName" }) -eq 0
+    if ($repoExists) {
+        Write-Host '  Repository already exists; pushing instead.' -ForegroundColor Yellow
+    }
+    else {
+        # Create without --source/--remote: `gh repo create --remote=origin`
+        # fails outright when an origin remote is already configured (as it is
+        # after any earlier push attempt), and that aborted the run after the
+        # repository had in fact been created. Remote wiring and the push are
+        # done explicitly below so both paths behave the same.
+        gh repo create $RepoName --public
         if ($LASTEXITCODE -ne 0) {
-            Write-Host 'ERROR: repo create or push failed.' -ForegroundColor Red
+            Write-Host 'ERROR: repo create failed.' -ForegroundColor Red
             exit 1
         }
     }
-    else {
-        Write-Host '  Repository already exists; pushing instead.' -ForegroundColor Yellow
-        if ((Invoke-Native { git remote get-url origin }) -ne 0) {
-            git remote add origin "https://github.com/$Owner/$RepoName.git"
-        }
-        git push -u origin main
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host 'ERROR: push failed.' -ForegroundColor Red
-            exit 1
-        }
+
+    if ((Invoke-Native { git remote get-url origin }) -ne 0) {
+        git remote add origin "https://github.com/$Owner/$RepoName.git"
+    }
+    git push -u origin main
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'ERROR: push failed.' -ForegroundColor Red
+        exit 1
     }
 
     Step '5/5' 'Done'
