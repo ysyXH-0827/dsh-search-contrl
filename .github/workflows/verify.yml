@@ -1,0 +1,74 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The plugin's only peer dependency is the DSH schema library. Installing
+      # it at the repo root mirrors the documented layout, where Node resolves
+      # the peer by walking up from lib/.
+      - name: Install peer dependency
+        run: npm install --no-save @deepseek-ai/schemastery@^3
+
+      - name: Check syntax of every module
+        run: |
+          for f in lib/*.js; do
+            node --check "$f"
+          done
+
+      - name: Confirm no API key is committed
+        run: |
+          if grep -rInE 'tvly-[A-Za-z0-9_-]{15,}' --include='*.js' --include='*.yml' --include='*.json' --include='*.md' .; then
+            echo "::error::a Tavily API key appears to be committed"
+            exit 1
+          fi
+          echo "no API key found"
+
+      - name: Mount the plugin and assert registration
+        run: |
+          node --input-type=module -e "
+          import('./lib/index.js').then((m) => {
+            const problems = [];
+            if (m.name !== 'tech-daily-report') problems.push('name');
+            if (!Array.isArray(m.inject) || !m.inject.includes('skills')) problems.push('inject');
+            if (typeof m.apply !== 'function') problems.push('apply');
+            if (typeof m.Config !== 'function') problems.push('Config');
+
+            const fields = ['tavilyApiKey', 'searchDepth', 'maxResults', 'timeoutMs'];
+            for (const f of fields) {
+              if (!(f in m.Config.dict)) problems.push('Config.' + f);
+            }
+
+            // Without a key: the skill must register and no tool may be added.
+            const seen = [];
+            m.apply({ skills: { register: (s) => { seen.push(s.name); return () => {}; } } }, { tavilyApiKey: { get: () => '' } });
+            if (seen.length !== 1 || seen[0] !== 'tech-daily-report') problems.push('skill registration');
+
+            // With a key: the search tool must register.
+            let tool;
+            m.apply({
+              skills: { register: () => () => {} },
+              inject: (d, fn) => { fn({ effect: (f) => f(), tools: { register: (t) => { tool = t; return () => {}; } } }); return () => {}; },
+              on: () => {},
+            }, { tavilyApiKey: { get: () => 'tvly-placeholder' } });
+            if (tool?.name !== 'tech_daily_search') problems.push('search tool registration');
+
+            if (problems.length) {
+              console.error('FAILED: ' + problems.join(', '));
+              process.exit(1);
+            }
+            console.log('plugin mounts, skill registers, search tool registers');
+          }).catch((e) => { console.error(e); process.exit(1); });
+          "

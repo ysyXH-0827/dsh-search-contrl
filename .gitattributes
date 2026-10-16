@@ -1,0 +1,9 @@
+# Normalize line endings for a cross-platform plugin: keep LF in the repo so
+# the shipped JavaScript stays byte-identical on Windows, macOS and Linux.
+* text=auto eol=lf
+
+# Binary assets, if any are added later.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
