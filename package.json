@@ -5,6 +5,9 @@
   "private": false,
   "type": "module",
   "main": "lib/index.js",
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/search-tool.js && node --check lib/config.js && node --check lib/bing.js && node --check lib/tavily.js"
+  },
   "exports": {
     ".": "./lib/index.js"
   },
