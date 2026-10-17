@@ -17,7 +17,7 @@
 
 - **日期范围灵活** — 只说「来一份日报」出当天日报；给出起止日期则按区间整理；说「本周」按自然周周一至周日；说「最近 7 天」按连续 7 个自然日。
 - **成就播报有硬性口径** — 每条成就必须写明主体、指标、数值、单位、统计口径、时间范围和成就级别（世界/行业/公司/阶段性）。没有可靠数据时明确写「暂无已确认的新成就」，不允许用宣传口号替代，也不允许在口径不清时使用「全球第一」「创纪录」这类绝对表述。
-- **自带搜索适配层** — 可选配置 Tavily API Key，插件会注册 `tech_daily_search` 工具，直接调用 Tavily，不依赖 DSH 内置的 web search。支持 `search`、`batch`、`extract` 三种动作；提取结果按 URL 缓存 24 小时，额度超限时短暂熔断而不是继续扣费。
+- **双通道搜索，默认免费** — 注册 `tech_daily_search`：默认走免费的 Bing RSS 通道（无需 Key，只返回摘要），配置 Tavily Key 后可切到付费通道拿到 AI 答案与正文提取；`provider: "auto"` 先免费、失败才回退。提取结果按 URL 缓存 24 小时，Tavily 额度超限时短暂熔断而不是继续扣费。
 - **渠道矩阵而非单一搜索** — 技能内置各板块的官方与监管渠道清单（品牌官网新品页、工信部新车申报公示与 3C 认证、GitHub/Hugging Face 模型卡、arXiv、NHTSA、FIA 等），并要求逐项尝试。
 - **「暂无」有判定门槛** — 只有在官网、监管备案、行业媒体三类渠道都无记录，且列出实际检查过的渠道清单与受限原因时，才允许写「暂无」。禁止把「我没查到」表述成「不存在」。
 
@@ -73,32 +73,50 @@ pnpm install
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `tavilyApiKey` | string (secret) | `""` | Tavily API Key。留空则只注册技能、不注册搜索工具。 |
-| `searchDepth` | `basic` \| `advanced` | `basic` | 检索深度。`basic` 每次约 1 credit，`advanced` 约 2 credits 且返回更丰富上下文。 |
+| `tavilyApiKey` | string (secret) | `""` | Tavily API Key，可选。留空时检索走免费的 Bing 通道，只有正文提取不可用。 |
+| `searchProvider` | `auto` \| `bing` \| `tavily` | `auto` | 检索通道。`auto` 先用免费的 Bing，Bing 失败且配了 Key 才回退 Tavily；`bing`/`tavily` 为强制单通道。 |
+| `bingMarket` | string | `zh-CN` | Bing 免费通道的地区市场，例如 `zh-CN`、`en-US`。 |
+| `searchDepth` | `basic` \| `advanced` | `basic` | Tavily 检索深度。`basic` 每次约 1 credit，`advanced` 约 2 credits 且返回更丰富上下文。Bing 通道不受此项影响。 |
 | `maxResults` | number (1–20) | `8` | 每次检索返回的结果条数上限。 |
-| `timeoutMs` | number (5000–120000) | `45000` | 单次 Tavily 请求超时时间（毫秒）。 |
+| `timeoutMs` | number (5000–120000) | `45000` | 单次上游请求超时时间（毫秒）。 |
 
-### 获取 Tavily API Key
+### 获取 Tavily API Key（可选）
 
 在 [tavily.com](https://www.tavily.com/) 注册，免费额度为每月 1000 credits，无需信用卡。一次完整日报约消耗 6 至 12 credits；`extract` 有 24 小时 URL 缓存、多主题可合并成一次 `batch`，重复采集同一批来源时的实际消耗会明显低于逐条检索。
+
+如果不想消耗额度，把 `searchProvider` 保持默认的 `auto`（或显式设为 `bing`）即可：检索走 Bing RSS，零成本，代价是只有摘要、没有 AI 答案，也不能用 `extract` 取正文。
 
 > ⚠️ **切勿把真实 Key 提交到版本库。** 仓库的 `.gitignore` 已排除常见密钥文件，配置默认值为空字符串。
 
 ## 搜索工具
 
-配置 Key 后，插件注册 `tech_daily_search`：
+无论是否配置 Key，插件都会注册 `tech_daily_search`；默认先用免费的 Bing 通道：
 
-**检索**
+**免费检索（Bing RSS，无需 Key）**
+
+```json
+{
+  "action": "search",
+  "query": "荣耀 WIN2 2K 185Hz 发布会",
+  "provider": "bing",
+  "include_domains": ["honor.com"]
+}
+```
+
+返回 `provider: "bing"` 与 `results` 数组，每项含 `url`、`title`、`content`（摘要）、`published_date`。已知边界：一页约 10 条、最多翻 3 页；`include_domains`/`exclude_domains` 会被翻译成 `site:`/`-site:` 运算符；Bing 会限速，批量并发默认压到 3。
+
+**付费检索（Tavily，需要 Key）**
 
 ```json
 {
   "action": "search",
   "query": "荣耀 Magic9 发布会 发布时间",
+  "provider": "tavily",
   "include_domains": ["honor.com"]
 }
 ```
 
-返回 `answer`（AI 摘要）与 `results` 数组，每项含 `url`、`title`、`content`、`score`、`published_date`。
+额外返回 `answer`（AI 摘要），结果项含 `score`。`provider: "auto"`（默认）先用 Bing，Bing 失败且配置了 Key 时才付费回退，返回里的 `provider` 字段始终说明这次实际是谁答的。
 
 **提取正文**
 
@@ -109,7 +127,7 @@ pnpm install
 }
 ```
 
-用于官网导航占满页面、正文被截断的情况。实测荣耀官网手机页可提取约 19 万字符，远多于普通抓取。
+用于官网导航占满页面、正文被截断的情况。实测荣耀官网手机页可提取约 19 万字符，远多于普通抓取。**该动作只有 Tavily 通道，没有 Key 时直接报错**。
 
 **批量检索（多主题快路径）**
 
@@ -178,7 +196,8 @@ pnpm install
 ├── lib/
 │   ├── index.js        # 插件入口：注册技能与搜索工具
 │   ├── config.js       # 配置 schema（schemastery）
-│   ├── search-tool.js  # tech_daily_search 工具定义
+│   ├── search-tool.js  # tech_daily_search 工具定义与通道路由
+│   ├── bing.js         # 免费通道：Bing RSS 适配（无需 Key）
 │   └── tavily.js       # Tavily HTTP 适配层
 ├── cordis.patch.yml    # bundle patch：声明插件行
 ├── package.json

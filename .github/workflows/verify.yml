@@ -28,6 +28,42 @@ jobs:
             node --check "$f"
           done
 
+      - name: Test the keyless Bing adapter offline
+        run: |
+          node --input-type=module -e "
+          import('./lib/bing.js').then((m) => {
+            const problems = [];
+
+            const q = m.buildBingQuery('荣耀 WIN2', ['honor.com', 'ithome.com'], ['zhihu.com']);
+            if (!q.includes('(site:honor.com OR site:ithome.com)')) problems.push('include_domains');
+            if (!q.includes('-site:zhihu.com')) problems.push('exclude_domains');
+
+            const url = m.buildBingUrl(q, { market: 'zh-CN', first: 10 });
+            if (!url.includes('format=rss')) problems.push('rss flag');
+            if (!url.includes('first=10')) problems.push('pagination offset');
+            if (!url.includes('mkt=zh-CN')) problems.push('market');
+
+            const xml = '<rss><channel>' +
+              '<item><title>标题 &amp; 测试</title><link>https://example.org/a</link>' +
+              '<description>&lt;b&gt;摘要&lt;/b&gt; 文本</description>' +
+              '<pubDate>Fri, 16 Oct 2026 22:38:00 GMT</pubDate></item>' +
+              '<item><title>无链接条目</title><description>x</description></item>' +
+              '</channel></rss>';
+            const items = m.parseBingRss(xml);
+            if (items.length !== 1) problems.push('item count');
+            if (items[0].url !== 'https://example.org/a') problems.push('url');
+            if (items[0].title !== '标题 & 测试') problems.push('entity decode');
+            if (!items[0].content.includes('摘要')) problems.push('tag strip');
+            if (!items[0].published_date.includes('2026-10-16')) problems.push('published date');
+            for (const it of items) {
+              for (const v of Object.values(it)) if (v === undefined) problems.push('undefined value');
+            }
+
+            if (problems.length) { console.error('FAILED: ' + problems.join(', ')); process.exit(1); }
+            console.log('bing adapter: filters, rss url, entity decode, tag strip, undefined guard');
+          }).catch((e) => { console.error(e); process.exit(1); });
+          "
+
       - name: Confirm no API key is committed
         run: |
           if grep -rInE 'tvly-[A-Za-z0-9_-]{15,}' --include='*.js' --include='*.yml' --include='*.json' --include='*.md' .; then
@@ -46,15 +82,23 @@ jobs:
             if (typeof m.apply !== 'function') problems.push('apply');
             if (typeof m.Config !== 'function') problems.push('Config');
 
-            const fields = ['tavilyApiKey', 'searchDepth', 'maxResults', 'timeoutMs'];
+            const fields = ['tavilyApiKey', 'searchProvider', 'bingMarket', 'searchDepth', 'maxResults', 'timeoutMs'];
             for (const f of fields) {
               if (!(f in m.Config.dict)) problems.push('Config.' + f);
             }
 
-            // Without a key: the skill must register and no tool may be added.
+            // Without any key: the skill must register AND the search tool must
+            // still register, because its default channel is the keyless Bing
+            // adapter. Losing the tool here would make the free channel dead code.
             const seen = [];
-            m.apply({ skills: { register: (s) => { seen.push(s.name); return () => {}; } } }, { tavilyApiKey: { get: () => '' } });
+            let unkeyedTool;
+            m.apply({
+              skills: { register: (s) => { seen.push(s.name); return () => {}; } },
+              inject: (d, fn) => { fn({ effect: (f) => f(), tools: { register: (t) => { unkeyedTool = t; return () => {}; } } }); return () => {}; },
+              on: () => {},
+            }, { tavilyApiKey: { get: () => '' } });
             if (seen.length !== 1 || seen[0] !== 'tech-daily-report') problems.push('skill registration');
+            if (unkeyedTool?.name !== 'tech_daily_search') problems.push('keyless search tool registration');
 
             // With a key: the search tool must register.
             let tool;
@@ -69,6 +113,6 @@ jobs:
               console.error('FAILED: ' + problems.join(', '));
               process.exit(1);
             }
-            console.log('plugin mounts, skill registers, search tool registers');
+            console.log('plugin mounts, skill registers, search tool registers with and without a key');
           }).catch((e) => { console.error(e); process.exit(1); });
           "
