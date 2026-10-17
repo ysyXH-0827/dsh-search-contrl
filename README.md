@@ -98,7 +98,7 @@ pnpm install
 ```json
 {
   "action": "search",
-  "query": "荣耀 WIN2 2K 185Hz 发布会",
+  "query": "国产大模型 开源 发布",
   "provider": "bing",
   "include_domains": ["honor.com"]
 }
@@ -111,7 +111,7 @@ pnpm install
 ```json
 {
   "action": "search",
-  "query": "荣耀 Magic9 发布会 发布时间",
+  "query": "国产大模型 开源 发布",
   "provider": "tavily",
   "include_domains": ["honor.com"]
 }
@@ -136,7 +136,7 @@ pnpm install
 {
   "action": "batch",
   "queries": [
-    { "query": "荣耀 WIN2 发布会 时间", "label": "honor", "include_domains": ["honor.com"] },
+    { "query": "国产大模型 开源 发布", "label": "llm" },
     { "query": "2026年10月17日 大模型 开源", "label": "cn-ai", "max_results": 5 }
   ],
   "snippet_chars": 400
