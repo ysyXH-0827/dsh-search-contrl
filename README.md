@@ -129,6 +129,7 @@ pnpm install
 **缓存与计费**
 
 - `extract` 的结果按 URL 缓存 24 小时。返回里的 `served_from_cache` 表示本次有几条来自缓存，`credits_estimated` 估算本次新消耗的 credit；页面确实更新过时才加 `refresh: true` 绕过缓存。
+- **缓存副本有截断上限**：写入缓存时会保留正文前 **24,000 字符**，超出部分以 `[content truncated when cached; ...]` 标记收尾。首次抓取返回的是完整正文，只有命中缓存时才会看到这个标记；确实需要尾部内容时用 `refresh: true` 重新抓取（会重新计费）。
 - `search` 每次请求 1 credit，`extract` 每 5 个成功 URL 1 credit。因此：不要在同一轮采集里重复抓同一 URL；`extract` 一次传满 20 个 URL 才划算；多主题检索合并成一次 `batch`，不要用连续小批次去「试探」。
 - 上游明确回报额度或频率超限时，插件短暂熔断并在返回体里给出 `credit_guard` 字段。此时应消费已有缓存或等 `retry_after_ms` 之后再试，不要重试轰炸，并把这一限制写进日报的检索说明。
 
