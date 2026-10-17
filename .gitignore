@@ -16,6 +16,10 @@ secrets.json
 .DS_Store
 Thumbs.db
 
+# Local caches written by scripts/*.mjs
+.cache/
+**/.cache/
+
 # Logs
 *.log
 npm-debug.log*
