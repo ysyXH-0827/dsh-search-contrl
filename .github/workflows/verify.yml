@@ -34,8 +34,8 @@ jobs:
           import('./lib/bing.js').then((m) => {
             const problems = [];
 
-            const q = m.buildBingQuery('国产大模型', ['honor.com', 'ithome.com'], ['zhihu.com']);
-            if (!q.includes('(site:honor.com OR site:ithome.com)')) problems.push('include_domains');
+            const q = m.buildBingQuery('国产大模型', ['huggingface.co', 'github.com'], ['zhihu.com']);
+            if (!q.includes('(site:huggingface.co OR site:github.com)')) problems.push('include_domains');
             if (!q.includes('-site:zhihu.com')) problems.push('exclude_domains');
 
             const url = m.buildBingUrl(q, { market: 'zh-CN', first: 10 });

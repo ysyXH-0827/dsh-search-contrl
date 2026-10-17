@@ -100,7 +100,7 @@ pnpm install
   "action": "search",
   "query": "国产大模型 开源 发布",
   "provider": "bing",
-  "include_domains": ["honor.com"]
+  "include_domains": ["huggingface.co"]
 }
 ```
 
@@ -113,7 +113,7 @@ pnpm install
   "action": "search",
   "query": "国产大模型 开源 发布",
   "provider": "tavily",
-  "include_domains": ["honor.com"]
+  "include_domains": ["huggingface.co"]
 }
 ```
 
@@ -124,11 +124,11 @@ pnpm install
 ```json
 {
   "action": "extract",
-  "urls": ["https://www.honor.com/cn/phones/honor-magic9-pro-max/spec"]
+  "urls": ["https://github.com/QwenLM/BlenderWorld"]
 }
 ```
 
-用于官网导航占满页面、正文被截断的情况。实测荣耀官网手机页可提取约 19 万字符，远多于普通抓取。**该动作只有 Tavily 通道，没有 Key 时直接报错**。
+用于导航占满页面、正文被截断的情况。实测长页面（模型卡、仓库 README、厂商规格页）可提取数万字符量级，远多于普通抓取。**该动作只有 Tavily 通道，没有 Key 时直接报错**。
 
 **批量检索（多主题快路径）**
 
@@ -167,7 +167,7 @@ pnpm install
 工具位置：`scripts/scan-archives.mjs`、`scripts/bing-search.mjs`；两者都带磁盘缓存，重复采集同一时段基本零成本。
 ## 使用建议
 
-厂商官网的规格页路径并不统一，猜错会拿到 404。例如荣耀官网规格页是 `/spec`（`/specs` 返回 404），产品资讯在 `/cn/news/`，活动页在 `/cn/activity/`，上市公告在 `/cn/shop/notice-*`。建议先用 `search` 配合 `include_domains` 定位正确链接，再用 `extract` 取回正文。
+厂商官网的规格页路径并不统一，猜错会拿到 404：规格页常见 `/spec` 与 `/specs` 两种写法，产品资讯多在 `/news/`，活动页在 `/activity/`，上市公告在 `/notice-*`。建议先用 `search` 配合 `include_domains` 定位正确链接，再用 `extract` 取回正文，不要靠猜路径。
 
 ## 智能体团队采集
 
