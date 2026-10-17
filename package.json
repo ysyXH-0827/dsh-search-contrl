@@ -1,6 +1,6 @@
 {
   "name": "dsh-tech-daily-report",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Chinese technology daily report skill for DSH, covering domestic and international AI, phones and vehicles with verifiable achievements.",
   "private": false,
   "type": "module",

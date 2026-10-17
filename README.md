@@ -17,7 +17,7 @@
 
 - **日期范围灵活** — 只说「来一份日报」出当天日报；给出起止日期则按区间整理；说「本周」按自然周周一至周日；说「最近 7 天」按连续 7 个自然日。
 - **成就播报有硬性口径** — 每条成就必须写明主体、指标、数值、单位、统计口径、时间范围和成就级别（世界/行业/公司/阶段性）。没有可靠数据时明确写「暂无已确认的新成就」，不允许用宣传口号替代，也不允许在口径不清时使用「全球第一」「创纪录」这类绝对表述。
-- **自带搜索适配层** — 可选配置 Tavily API Key，插件会注册 `tech_daily_search` 工具，直接调用 Tavily，不依赖 DSH 内置的 web search。支持 `search` 与 `extract` 两种动作。
+- **自带搜索适配层** — 可选配置 Tavily API Key，插件会注册 `tech_daily_search` 工具，直接调用 Tavily，不依赖 DSH 内置的 web search。支持 `search`、`batch`、`extract` 三种动作；提取结果按 URL 缓存 24 小时，额度超限时短暂熔断而不是继续扣费。
 - **渠道矩阵而非单一搜索** — 技能内置各板块的官方与监管渠道清单（品牌官网新品页、工信部新车申报公示与 3C 认证、GitHub/Hugging Face 模型卡、arXiv、NHTSA、FIA 等），并要求逐项尝试。
 - **「暂无」有判定门槛** — 只有在官网、监管备案、行业媒体三类渠道都无记录，且列出实际检查过的渠道清单与受限原因时，才允许写「暂无」。禁止把「我没查到」表述成「不存在」。
 
@@ -80,7 +80,7 @@ pnpm install
 
 ### 获取 Tavily API Key
 
-在 [tavily.com](https://www.tavily.com/) 注册，免费额度为每月 1000 credits，无需信用卡。日报场景（每天约 6 至 12 次调用）基本够用。
+在 [tavily.com](https://www.tavily.com/) 注册，免费额度为每月 1000 credits，无需信用卡。一次完整日报约消耗 6 至 12 credits；`extract` 有 24 小时 URL 缓存、多主题可合并成一次 `batch`，重复采集同一批来源时的实际消耗会明显低于逐条检索。
 
 > ⚠️ **切勿把真实 Key 提交到版本库。** 仓库的 `.gitignore` 已排除常见密钥文件，配置默认值为空字符串。
 
@@ -110,6 +110,27 @@ pnpm install
 ```
 
 用于官网导航占满页面、正文被截断的情况。实测荣耀官网手机页可提取约 19 万字符，远多于普通抓取。
+
+**批量检索（多主题快路径）**
+
+```json
+{
+  "action": "batch",
+  "queries": [
+    { "query": "荣耀 WIN2 发布会 时间", "label": "honor", "include_domains": ["honor.com"] },
+    { "query": "2026年10月17日 大模型 开源", "label": "cn-ai", "max_results": 5 }
+  ],
+  "snippet_chars": 400
+}
+```
+
+1 至 8 条 query 在一次调用内并发执行，返回 `{ ok, results: [{ label, ok, query, results, response_time }], succeeded, failed, elapsed_ms }`。单条失败不影响其余条目，失败项带 `ok: false` 与 `error`。实测同一批 6 组主题：串行发 6 次 `search` 用 17.1 秒，一次 `batch` 用 6.5 秒；同一 query 在 10 分钟内重复调用直接命中进程内缓存，返回 0 毫秒。
+
+**缓存与计费**
+
+- `extract` 的结果按 URL 缓存 24 小时。返回里的 `served_from_cache` 表示本次有几条来自缓存，`credits_estimated` 估算本次新消耗的 credit；页面确实更新过时才加 `refresh: true` 绕过缓存。
+- `search` 每次请求 1 credit，`extract` 每 5 个成功 URL 1 credit。因此：不要在同一轮采集里重复抓同一 URL；`extract` 一次传满 20 个 URL 才划算；多主题检索合并成一次 `batch`，不要用连续小批次去「试探」。
+- 上游明确回报额度或频率超限时，插件短暂熔断并在返回体里给出 `credit_guard` 字段。此时应消费已有缓存或等 `retry_after_ms` 之后再试，不要重试轰炸，并把这一限制写进日报的检索说明。
 
 ### 使用建议
 
