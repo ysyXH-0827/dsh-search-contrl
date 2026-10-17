@@ -1,48 +1,31 @@
 {
-  "name": "dsh-search-contrl",
-  "version": "2.2.17",
-  "description": "DSH-Search-Contrl: a DSH skill/plugin for scoped web search and Chinese daily reports, with a settings GUI for custom search sources, arbitrary topics (not only tech), creator-link scoped search, and one-click rollback.",
+  "name": "dsh-tech-daily-report",
+  "version": "1.4.1",
+  "description": "Chinese technology daily report skill for DSH, covering domestic and international AI, phones and vehicles with verifiable achievements.",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/search-tool.js && node --check lib/config.js && node --check lib/custom-search.js && node --check lib/settings-store.js && node --check lib/settings-api.js && node --check lib/client.js && node --check lib/cookie-jar.js && node --check lib/cookie-capture.js && node --check lib/bilibili-api.js && node --check scripts/report-metrics.mjs && node --check scripts/test-metrics.mjs && node --check scripts/daily-collect.mjs && node --check scripts/watchlist.mjs && node --check scripts/archive-merge.mjs && node --check scripts/archive-pull.mjs && node --check scripts/archive-digest.mjs",
-    "test": "node scripts/test-settings.mjs && node scripts/test-client.mjs && node scripts/test-cookie.mjs && node scripts/test-bloggers.mjs && node scripts/test-metrics.mjs",
-    "smoke": "node scripts/smoke-cdp.mjs",
-    "prepack": "node scripts/prepack.mjs",
-    "collect": "node scripts/daily-collect.mjs",
-    "watchlist": "node scripts/watchlist.mjs",
-    "merge": "node scripts/archive-merge.mjs",
-    "archive": "node scripts/daily-collect.mjs --archive",
-    "pull": "node scripts/archive-pull.mjs",
-    "digest": "node scripts/archive-digest.mjs"
+    "check": "node --check lib/index.js && node --check lib/search-tool.js && node --check lib/config.js && node --check lib/bing.js && node --check lib/tavily.js"
   },
   "exports": {
-    ".": "./lib/index.js",
-    "./client": "./lib/client.js",
-    "./package.json": "./package.json"
+    ".": "./lib/index.js"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE",
-    "scripts/daily-collect.mjs",
-    "scripts/watchlist.mjs",
-    "scripts/archive-merge.mjs",
-    "scripts/archive-pull.mjs",
-    "scripts/archive-digest.mjs"
+    "LICENSE"
   ],
   "keywords": [
     "dsh",
     "dsh-plugin",
     "cordis",
     "skill",
-    "search",
-    "search-control",
+    "technology",
+    "news",
     "daily-report",
-    "creator-search",
-    "settings-ui"
+    "tavily"
   ],
   "license": "MIT",
   "peerDependencies": {
@@ -54,32 +37,6 @@
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "inject": [
-        "@deepseek-ai/dsh-client-ui-renderer",
-        "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-plugin-manager"
-      ],
-      "platform": "web"
     }
-  },
-  "displayName": "DSH-Search-Contrl",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ysyXH-0827/dsh-search-contrl.git"
-  },
-  "homepage": "https://github.com/ysyXH-0827/dsh-search-contrl#readme",
-  "bugs": {
-    "url": "https://github.com/ysyXH-0827/dsh-search-contrl/issues"
-  },
-  "author": "ysyXH-0827",
-  "engines": {
-    "node": ">=20"
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
   }
 }
