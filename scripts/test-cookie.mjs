@@ -409,7 +409,7 @@ await test('latestVideos prefers the WBI-signed endpoint', async () => {
       return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV1', title: 't', created: 1, length: '01:00', play: 1, comment: 0, description: '' }] } } }) };
     },
   });
-  const videos = await client.latestVideos('25876945', { ps: 1 });
+  const videos = await client.latestVideos('990006', { ps: 1 });
   assert.equal(videos.length, 1);
   assert.ok(seen.some(url => url.includes('/x/space/wbi/arc/search?')), 'the signed endpoint must be tried');
   assert.ok(seen.some(url => url.includes('w_rid=')), 'the signed request must carry w_rid');
@@ -432,9 +432,63 @@ await test('latestVideos falls back to the unsigned endpoint after a rate limit'
       return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV2', title: 'fallback', created: 1, length: '01:00', play: 2, comment: 0, description: '' }] } } }) };
     },
   });
-  const videos = await client.latestVideos('25876945', { ps: 1 });
+  const videos = await client.latestVideos('990007', { ps: 1 });
   assert.equal(videos[0].bvid, 'BV2');
   assert.ok(seen.some(url => url.includes('/x/space/arc/search?mid=')), 'the unsigned fallback must run');
+});
+
+await test('the space list is cached, so asking twice costs nothing the second time', async () => {
+  const mid = '990001';
+  let calls = 0;
+  const fetchImpl = async url => {
+    calls += 1;
+    if (url.includes('/x/web-interface/nav')) {
+      return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
+    }
+    return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV9', title: 'cached', created: 1, length: '01:00', play: 1, comment: 0, description: '' }] } } }) };
+  };
+  const first = createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl });
+  await first.latestVideos(mid, { ps: 3 });
+  const afterFirst = calls;
+  const second = createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl });
+  const videos = await second.latestVideos(mid, { ps: 3 });
+  assert.equal(videos.length, 1);
+  assert.equal(calls, afterFirst, 'the second client must be served from the shared cache');
+  assert.ok(afterFirst >= 1);
+});
+
+await test('wbi keys are reused across clients instead of refetching nav every call', async () => {
+  let navCalls = 0;
+  const fetchImpl = async url => {
+    if (url.includes('/x/web-interface/nav')) {
+      navCalls += 1;
+      return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
+    }
+    return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV8', title: 'k', created: 1, length: '01:00', play: 1, comment: 0, description: '' }] } } }) };
+  };
+  await createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl }).latestVideos('990002', { ps: 1 });
+  const navAfterWarmup = navCalls;
+  await createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl }).latestVideos('990003', { ps: 1 });
+  await createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl }).wbiKeys();
+  assert.equal(navCalls, navAfterWarmup, 'nav must be fetched at most once while the key is fresh');
+});
+
+await test('only a rate limit triggers the backoff, other failures fall through at once', async () => {
+  let sleeps = 0;
+  const client = createBilibiliClient({
+    cookie: 'SESSDATA=x',
+    sleepImpl: async () => { sleeps += 1; },
+    fetchImpl: async url => {
+      if (url.includes('/x/web-interface/nav')) {
+        return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
+      }
+      if (url.includes('/wbi/')) return { ok: true, json: async () => ({ code: -412, message: 'request was banned' }) };
+      return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV7', title: 'fast', created: 1, length: '01:00', play: 1, comment: 0, description: '' }] } } }) };
+    },
+  });
+  const videos = await client.latestVideos('990004', { ps: 1 });
+  assert.equal(videos[0].bvid, 'BV7');
+  assert.equal(sleeps, 0, 'a -412 must not wait 1.2 s before the fallback');
 });
 
 //#endregion
