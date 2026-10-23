@@ -77,7 +77,7 @@ jobs:
           node --input-type=module -e "
           import('./lib/index.js').then((m) => {
             const problems = [];
-            if (m.name !== 'tech-daily-report') problems.push('name');
+            if (m.name !== 'dsh-search-contrl') problems.push('name');
             if (!Array.isArray(m.inject) || !m.inject.includes('skills')) problems.push('inject');
             if (typeof m.apply !== 'function') problems.push('apply');
             if (typeof m.Config !== 'function') problems.push('Config');
@@ -97,8 +97,8 @@ jobs:
               inject: (d, fn) => { fn({ effect: (f) => f(), tools: { register: (t) => { unkeyedTool = t; return () => {}; } } }); return () => {}; },
               on: () => {},
             }, { tavilyApiKey: { get: () => '' } });
-            if (seen.length !== 1 || seen[0] !== 'tech-daily-report') problems.push('skill registration');
-            if (unkeyedTool?.name !== 'tech_daily_search') problems.push('keyless search tool registration');
+            if (seen.length !== 1 || seen[0] !== 'dsh-search-contrl') problems.push('skill registration');
+            if (unkeyedTool?.name !== 'search_contrl') problems.push('keyless search tool registration');
 
             // With a key: the search tool must register.
             let tool;
@@ -107,7 +107,7 @@ jobs:
               inject: (d, fn) => { fn({ effect: (f) => f(), tools: { register: (t) => { tool = t; return () => {}; } } }); return () => {}; },
               on: () => {},
             }, { tavilyApiKey: { get: () => 'tvly-placeholder' } });
-            if (tool?.name !== 'tech_daily_search') problems.push('search tool registration');
+            if (tool?.name !== 'search_contrl') problems.push('search tool registration');
 
             if (problems.length) {
               console.error('FAILED: ' + problems.join(', '));
