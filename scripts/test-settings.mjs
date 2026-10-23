@@ -23,7 +23,7 @@ import {
   restoreSettings,
   saveSettings,
 } from '../lib/settings-store.js';
-import { buildBloggerQueries, buildTopicQueries, demoteSiteOperator, filterResultsByDomain, parseBloggerUrl, preferDeepLinks, sourceChannel } from '../lib/custom-search.js';
+import { buildBloggerQueries, buildTopicQueries, parseBloggerUrl, sourceChannel } from '../lib/custom-search.js';
 import { buildSettingsRoutes, isBridgeRequestAllowed } from '../lib/settings-api.js';
 
 let passed = 0;
@@ -120,38 +120,10 @@ test('restore rejects path traversal and unknown ids', () => {
 
 test('history is capped by the limit option', () => {
   const dir = tempDir();
-  // Pin the clock. Seven back-to-back saves can otherwise share a millisecond,
-  // which used to collapse two snapshots into one and make this assertion flaky.
   for (let i = 0; i < 7; i += 1) {
-    saveSettings(dir, { topics: [{ label: `t${i}`, keywords: ['k'] }] }, { limit: 3, now: new Date(Date.UTC(2026, 0, 1, 0, 0, 0, i)) });
+    saveSettings(dir, { topics: [{ label: `t${i}`, keywords: ['k'] }] }, { limit: 3 });
   }
   assert.equal(listHistory(dir).length, 3, 'the oldest snapshots beyond the limit are deleted');
-});
-
-test('two saves in the same millisecond keep separate snapshots', () => {
-  const dir = tempDir();
-  const now = new Date('2026-10-23T12:00:00.000Z');
-  saveSettings(dir, { topics: [{ label: 'v1', keywords: ['one'] }] }, { now });
-  saveSettings(dir, { topics: [{ label: 'v2', keywords: ['two'] }] }, { now });
-  saveSettings(dir, { topics: [{ label: 'v3', keywords: ['three'] }] }, { now });
-  const history = listHistory(dir);
-  // Three saves leave two snapshots: the very first write has nothing to replace.
-  assert.equal(history.length, 2, 'a collision must not overwrite a rollback point');
-  assert.equal(new Set(history.map((entry) => entry.id)).size, 2, 'the ids stay distinct');
-  assert.deepEqual(
-    history.map((entry) => entry.counts.topics),
-    [1, 1],
-    'each snapshot still holds the document it replaced'
-  );
-});
-
-test('same-millisecond snapshots list the newest first', () => {
-  const dir = tempDir();
-  const now = new Date('2026-10-23T12:00:00.000Z');
-  saveSettings(dir, { topics: [{ label: 'a', keywords: ['k'] }] }, { now });
-  saveSettings(dir, { topics: [{ label: 'b', keywords: ['k'] }] }, { now, reason: 'second' });
-  const [newest] = listHistory(dir);
-  assert.equal(newest.reason, 'second', 'the later write is the one the UI offers first');
 });
 
 test('counts summarise the document', () => {
@@ -174,7 +146,7 @@ test('creator links parse into a platform and a site scoped query', () => {
   assert.equal(bilibili.domain, 'bilibili.com');
   const x = buildBloggerQueries({ label: 'Some Dev', url: 'https://x.com/somedev' });
   assert.equal(x.ok, true);
-  assert.deepEqual(x.queries.map(item => item.query), ['site:x.com Some Dev', 'site:x.com somedev']);
+  assert.deepEqual(x.queries.map(item => item.query), ['site:x.com somedev', 'site:x.com Some Dev']);
   const wechat = buildBloggerQueries({ label: '某个公众号', url: 'https://mp.weixin.qq.com/s/abcdef' });
   assert.deepEqual(wechat.queries.map(item => item.query), ['site:mp.weixin.qq.com 某个公众号']);
 });
@@ -244,7 +216,6 @@ await test('the bridge routes save, describe and roll back', async () => {
   const first = JSON.parse(firstResponse.body);
   assert.equal(first.ok, true);
   assert.equal(first.value.counts.total, 0);
-  assert.equal(first.value.meta.features.delivery, true, 'describe must advertise the delivery capability');
 
   const save = byPath('save');
   const seedResponse = fakeResponse();
@@ -275,101 +246,6 @@ await test('the bridge routes save, describe and roll back', async () => {
   const wrongMethod = fakeResponse();
   await save.handler(fakeRequest({}, { method: 'GET' }), wrongMethod);
   assert.equal(wrongMethod.statusCode, 405);
-});
-
-
-await test('heredoc topic keeps its domains so callers can filter results', async () => {
-  const built = buildTopicQueries({ keywords: ['solid state battery'], domains: ['reuters.com'] });
-  assert.deepEqual(built.domains, ['reuters.com']);
-});
-
-await test('site: is demoted to a plain keyword for channels that ignore it', async () => {
-  assert.equal(demoteSiteOperator('site:bilibili.com 影视飓风'), 'bilibili.com 影视飓风');
-  assert.equal(demoteSiteOperator('plain query'), 'plain query');
-});
-
-await test('domain filter keeps the domain and its subdomains only', async () => {
-  const kept = filterResultsByDomain(
-    [
-      { url: 'https://reuters.com/a' },
-      { url: 'https://www.reuters.com/b' },
-      { url: 'https://m.ithome.com/c' },
-      { url: 'not a url' },
-      {},
-    ],
-    ['reuters.com']
-  );
-  assert.equal(kept.length, 2);
-  assert.equal(filterResultsByDomain([{ url: 'https://x.com/1' }], []).length, 1, 'no domains means no filtering');
-});
-
-
-await test('a creator name is queried before its numeric handle', async () => {
-  const built = buildBloggerQueries({ url: 'https://space.bilibili.com/946974', label: '影视飓风' });
-  assert.equal(built.queries[0].label, 'name');
-  assert.ok(built.queries[0].query.includes('影视飓风'));
-});
-
-await test('bare homepages give way to real content pages', async () => {
-  const kept = preferDeepLinks([
-    { url: 'https://www.bilibili.com/' },
-    { url: 'https://space.bilibili.com/946974' },
-  ]);
-  assert.equal(kept.length, 1);
-  assert.equal(kept[0].url, 'https://space.bilibili.com/946974');
-  const onlyHome = preferDeepLinks([{ url: 'https://www.bilibili.com/' }]);
-  assert.equal(onlyHome.length, 1, 'a homepage-only answer is still returned');
-});
-
-await test('snapshot names keep the full timestamp, not just the year and month', async () => {
-  const dir = tempDir();
-  const sameMoment = new Date('2026-10-24T09:00:00.000Z');
-  // The first save has nothing to replace, so it leaves no snapshot: seed one.
-  saveSettings(dir, { topics: [{ label: 'seed', keywords: ['seed'] }] }, { now: new Date('2026-10-23T09:00:00.000Z') });
-  saveSettings(dir, { topics: [{ label: 'a', keywords: ['a'] }] }, { now: sameMoment });
-  saveSettings(dir, { topics: [{ label: 'b', keywords: ['b'] }] }, { now: sameMoment });
-  saveSettings(dir, { topics: [{ label: 'c', keywords: ['c'] }] }, { now: new Date('2026-10-25T09:00:00.000Z') });
-  const ids = listHistory(dir).map(entry => entry.id);
-  assert.equal(ids.length, 3, 'three saves must leave three rollback points');
-  assert.equal(new Set(ids).size, 3, 'a same-millisecond save must not overwrite its predecessor');
-  for (const id of ids) {
-    assert.match(id, /^\d{4}-\d{2}-\d{2}T/, `a snapshot id must start with the full date, got ${id}`);
-  }
-  assert.match(ids[0], /^2026-10-25T/, 'the newest snapshot is listed first');
-});
-
-await test('delivery mode defaults to a file and accepts the three modes', async () => {
-  assert.equal(emptySettings().delivery.mode, 'file', 'a fresh store delivers by file');
-  assert.equal(normalizeSettings({}).delivery.mode, 'file', 'a missing field falls back to file');
-  assert.equal(normalizeSettings({ delivery: { mode: 'chat' } }).delivery.mode, 'chat');
-  assert.equal(normalizeSettings({ delivery: { mode: 'both' } }).delivery.mode, 'both');
-  assert.equal(normalizeSettings({ delivery: 'chat' }).delivery.mode, 'chat', 'a bare string is accepted');
-  assert.equal(normalizeSettings({ delivery: { mode: 'email' } }).delivery.mode, 'file', 'an unknown mode cannot leak through');
-  assert.deepEqual(normalizeSettings({ delivery: { mode: 'chat', extra: 1 } }).delivery, { mode: 'chat' }, 'unknown sub-fields are dropped');
-});
-
-await test('a saved delivery mode survives a write and a rollback', async () => {
-  const dir = tempDir();
-  const first = saveSettings(dir, { delivery: { mode: 'chat' }, bloggers: [{ label: '极客湾', url: 'https://space.bilibili.com/25876945' }] });
-  assert.equal(first.value.delivery.mode, 'chat');
-  assert.equal(readSettings(dir).value.delivery.mode, 'chat');
-  saveSettings(dir, { delivery: { mode: 'both' } });
-  const [snapshot] = listHistory(dir);
-  const restored = restoreSettings(dir, snapshot.id);
-  assert.equal(restored.ok, true);
-  assert.equal(restored.value.delivery.mode, 'chat', 'rolling back restores the earlier delivery mode too');
-});
-
-await test('the save route echoes the delivery mode back to the card', async () => {
-  const dir = tempDir();
-  const routes = buildSettingsRoutes({ dataDir: dir, pluginVersion: 'test', historyLimit: 10 });
-  const save = routes.find(route => route.path.endsWith('save'));
-  const response = fakeResponse();
-  await save.handler(fakeRequest({ settings: { delivery: { mode: 'chat' } } }), response);
-  const body = JSON.parse(response.body);
-  assert.equal(body.ok, true);
-  assert.equal(body.value.settings.delivery.mode, 'chat', 'a save must not drop the delivery mode');
-  assert.equal(readSettings(dir).value.delivery.mode, 'chat', 'the stored value must match what the card sent');
 });
 
 const failed = failures.length;

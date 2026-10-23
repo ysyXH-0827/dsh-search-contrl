@@ -70,48 +70,34 @@ const source = fs.readFileSync(bundlePath, 'utf8');
 new Function('window', source)(globalThis.window);
 
 assert.ok(loaded, 'the bundle must call window.__ModuleLoader__.load');
-assert.equal(loaded.id, 'dsh-search-contrl', 'the module id must match the package name');
+assert.equal(loaded.id, 'dsh-tech-daily-report', 'the module id must match the package name');
 
 const exports = loaded.factory(browserRequire);
 assert.equal(typeof exports.apply, 'function', 'the client must export apply');
 assert.deepEqual(exports.inject, ['slots'], 'the client must declare the slots service');
 assert.equal(typeof exports.SettingsCard, 'function', 'the card component must be exported for smoke tests');
 
-const injected = [];
-const registrations = [];
+let registered = null;
 const ctx = {
   slots: {
     inject(name, callback) {
-      injected.push(name);
-      return callback();
+      assert.equal(name, 'plugins.row.config');
+      callback();
     },
     register(meta, render) {
-      registrations.push({ meta, render });
+      registered = { meta, render };
       return render;
     },
   },
 };
 exports.apply(ctx);
-assert.deepEqual(injected, ['settings.section', 'plugins.row.config'], 'apply() must inject both slots');
+assert.ok(registered, 'apply() must register the row config slot');
+assert.equal(registered.meta.name, 'plugins.row.config');
+assert.equal(registered.meta.key, 'dsh-tech-daily-report#tech-daily-report');
 
-const section = registrations.find(item => item.meta.name === 'settings.section');
-assert.ok(section, 'the first-level settings section「搜索控制」must be registered');
-assert.equal(section.meta.id, 'search-contrl-settings');
-assert.equal(section.meta.label, '搜索控制');
-assert.equal(typeof section.meta.order, 'number', 'the section needs a numeric nav order');
-assert.ok(section.meta.order > 151, 'the section must sit after the bundled plugin sections (100–151)');
-
-const row = registrations.find(item => item.meta.name === 'plugins.row.config');
-assert.ok(row, 'apply() must keep registering the plugin row config page');
-assert.equal(row.meta.key, 'dsh-search-contrl#search-contrl');
-
-const summary = row.render({ view: 'summary' });
+const summary = registered.render({ view: 'summary' });
 assert.equal(typeof summary, 'string', 'the summary view must be plain text');
-assert.match(summary, /DSH-Search-Contrl/, 'the row summary must name the plugin');
-
-const sectionCard = section.render();
-assert.ok(sectionCard && typeof sectionCard === 'object', 'the settings section must render an element');
-assert.equal(sectionCard.type, exports.SettingsCard, 'the section renders the full settings card, not a summary');
+assert.match(summary, /科技日报/);
 
 /** Expand function components and collect every string child. */
 function textOf(element, depth = 0) {
@@ -132,25 +118,18 @@ assert.match(String(card.props.className), /tdr-card/);
 
 const text = textOf(card);
 for (const expected of [
-  'DSH-Search-Contrl',
+  '科技日报 · 自定义检索',
   '未配置自定义项，报告按固定六板块执行',
   '正在读取设置…',
   '搜索源',
   '主题',
   '博主',
   '历史版本',
-  '登录 Cookie',
-  '报告输出方式',
-  '只给文件',
-  '只在聊天中呈现',
-  '文件 + 聊天',
   '已保存',
   '清空自定义项',
 ]) {
   assert.ok(text.includes(expected), `the rendered card must contain "${expected}"`);
 }
-
-assert.equal(typeof exports.CookiePanel, 'function', 'the cookie panel must be exported');
 
 const link = exports.describeLink('https://space.bilibili.com/123456');
 assert.equal(link.domain, 'bilibili.com');
@@ -158,23 +137,7 @@ assert.equal(link.platform, 'B站');
 assert.equal(exports.describeLink('not a url'), null);
 assert.equal(exports.describeLink('https://example.com/x'), null);
 
-assert.ok(
-  source.includes('features?.delivery !== true'),
-  'the card must detect a Host that is still running a pre-2.2.0 plugin'
-);
-assert.ok(
-  source.includes('被正在运行的旧版服务端丢弃了'),
-  'the card must explain a delivery save that the old Host dropped, not snap back silently'
-);
-assert.ok(
-  source.includes('当前 DSH 进程里加载的仍是 2.2.0 之前的插件'),
-  'the delivery panel must warn while the Host is stale'
-);
-
-console.log('ok   settings.section「搜索控制」registers in the settings sidebar');
 console.log('ok   module loads and registers plugins.row.config under the patch row id');
 console.log('ok   the settings card renders its tabs, status and footer');
-console.log('ok   the card offers the three report delivery modes');
-console.log('ok   a stale Host is reported instead of silently reverting the delivery mode');
 console.log('ok   creator links map to a platform and domain');
 console.log('\nall client checks passed');

@@ -80,6 +80,7 @@ pnpm install
 | `searchDepth` | `basic` \| `advanced` | `basic` | Tavily 检索深度。`basic` 每次约 1 credit，`advanced` 约 2 credits 且返回更丰富上下文。Bing 通道不受此项影响。 |
 | `maxResults` | number (1–20) | `8` | 每次检索返回的结果条数上限。 |
 | `timeoutMs` | number (5000–120000) | `45000` | 单次上游请求超时时间（毫秒）。 |
+| `historyLimit` | number (5–100) | `20` | 设置页最多保留多少个历史版本用于回退。每次保存、重置、回退都会先快照被替换的版本，超出上限的最旧快照会被删除。 |
 
 ### 获取 Tavily API Key（可选）
 
@@ -152,7 +153,37 @@ pnpm install
 - `search` 每次请求 1 credit，`extract` 每 5 个成功 URL 1 credit。因此：不要在同一轮采集里重复抓同一 URL；`extract` 一次传满 20 个 URL 才划算；多主题检索合并成一次 `batch`，不要用连续小批次去「试探」。
 - 上游明确回报额度或频率超限时，插件短暂熔断并在返回体里给出 `credit_guard` 字段。此时应消费已有缓存或等 `retry_after_ms` 之后再试，不要重试轰炸，并把这一限制写进日报的检索说明。
 
-#
+## 设置页 GUI（自定义检索）
+
+插件在 **设置 → 插件 → tech-daily-report** 有一个配置页，用来替代手改 profile patch。三件事：
+
+| 能力 | 怎么填 | 落到检索上的样子 |
+|---|---|---|
+| 自定义搜索源 | 加一条源，类型选 Bing / Tavily / 指定站点 | 通道型源固定 provider；站点型源转成 `include_domains` |
+| 自定义主题（不限科技） | 主题名 + 关键词，可选限定站点 | 无站点：一条「关键词 关键词」查询；有站点：每站点一条 `site:` 查询（最多 4 条） |
+| 博主定向检索 | 粘贴博主主页链接 | 解析出平台域名，发 `site:平台域名 UID/昵称`（最多 2 条） |
+
+支持解析的链接：B 站、微博、知乎、X / Twitter、YouTube、抖音、快手、小红书、GitHub、Medium、Substack、CSDN、掘金、少数派、公众号（`mp.weixin.qq.com`）。解析不了的主页链接在保存时会被拒绝，不会静默写入。
+
+**版本可回退**：每次保存、重置、回退都会先把**被替换的那一版**写进历史，再写新版本；所以回退本身也能再回退，不存在「点错一次就回不去」。默认保留 20 个版本，用 `historyLimit` 调整。
+
+**数据落在哪**：`~/.dsh/plugin-data/dsh-tech-daily-report/settings.json`，历史在同目录 `history/`。不写 profile 的 patch 文件——GUI 不该改写 Host 合成出来的配置层；自带存储才能保证每次写入都可回退。可用 `TECH_DAILY_REPORT_DATA_DIR` 改目录。
+
+**读写桥**：渲染进程通过 `/api/tech-daily-report-settings/{describe,save,rollback,reset,history,preview}` 访问 Host，全部 POST，只接受同源回环请求（跨站、非本机、非 POST 一律拒绝）。`preview` 只计算将发送的查询，不消耗 Tavily credit。
+
+**Agent 侧用法**（不打开设置页也能用）：
+
+```json
+{ "action": "topic", "topicId": "t_xxx" }
+{ "action": "topic", "topic": "固态电池 量产", "domains": ["reuters.com"] }
+{ "action": "blogger", "url": "https://space.bilibili.com/123456", "label": "老石谈芯" }
+{ "action": "search", "query": "光刻机", "sourceId": "s_xxx" }
+{ "action": "history", "op": "list" }
+{ "action": "history", "op": "restore", "snapshot_id": "2026-10-23T13-21-49-123Z.json" }
+```
+
+不配置任何自定义项时，报告仍按固定六板块执行；配置了主题或博主，才追加对应检索。自定义内容同样受日期与来源纪律约束：先确认发布日期，再看内容，只用摘要不算核实。
+
 ## 自学习（月报收尾必做）
 
 每份月报交付后执行四步复盘：回顾目标 → 评估结果（条数/可达链接/覆盖日期）→ 分析原因 → 写规律。规则与失败库统一维护在 `docs/LESSONS.md`，可执行规则同步进技能；只写数字与命令，不写感想。
@@ -189,7 +220,8 @@ pnpm install
 | 失败不空转 | 成员中途失败时 Lead 直接补位写完板块，不等、不原样重派 |
 | 列表页直连 | 判断日归档/列表页是否为空必须直连抓取；提取通道可能只返回骨架 |
 | 写回并推送 | 每次团队采集后把踩坑与有效做法写回技能并提交推送，不做一次性动作 |
-| 成员模型选对 | 实测 deepseek-flash 成员连续 0 交付；换 gpt-5.4 后 3 个板块 2 个一次成功、1 个重跑成功 —— 连续空手要换模型，不要原样重派 || 扫描脚本化 | 归档页 DD 补零逐日抓取、直连判定；不得用提取通道判空 |
+| 成员模型选对 | 实测 deepseek-flash 成员连续 0 交付；换 gpt-5.4 后 3 个板块 2 个一次成功、1 个重跑成功 —— 连续空手要换模型，不要原样重派 |
+| 扫描脚本化 | 归档页 DD 补零逐日抓取、直连判定；不得用提取通道判空 |
 | 清单先落盘 | 候选清单写成文件再派活，成员只做核对与取舍 |
 | 批次时间预算 | 超预算即终止批次，Lead 用清单兜底，不把等待当进度 |
 | 成员任务预算 | 单成员 ≤12 次工具调用、≤8 分钟；超时或空手立即由 Lead 接手 |
@@ -198,24 +230,6 @@ pnpm install
 实测参考：3 条查询并发执行 wall 1080 ms，而单条分别 566 / 422 / 441 ms，串行约 1429 ms；5 个板块并行采集一轮可产出 100+ 条明细。
 
 
-## 自学习（月报收尾必做）
-
-每份月报交付后执行四步复盘：回顾目标 → 评估结果（条数/可达链接/覆盖日期）→ 分析原因 → 写规律。规则与失败库统一维护在 `docs/LESSONS.md`，可执行规则同步进技能；只写数字与命令，不写感想。
-
-## 输出两层：主事件 + 中等事件
-
-日报与月报固定两层：**第一层主事件**（每板块 3–5 条头条）+ **第二层中等事件**（每板块 2–4 条次一级）。中等事件必须标状态（预告/爆料/消息人士/企业测试口径），不得用促销与纯观点填充；候选先全量扫描再分层挑选。
-
-**来源多样性**：主事件尽量配两个独立来源（官方/监管/论文优先，独立媒体次之），只找到单一来源时标注“仅单一来源”，不把同一家媒体的多篇稿子当多源。
-
-## 性能基线（实测）
-
-| 环节 | 改造前 | 改造后 | 倍数 |
-| --- | --- | --- | --- |
-| 31 天归档扫描 | 串行 13.9 s | 并发 8：0.38 s（冷）/ 24 ms（热缓存） | 约 36× / 580× |
-| 6 条 Bing 查询 | 串行 1.41 s | 并发 4：0.60 s / 5 ms（热缓存） | 2.3× / 280× |
-
-工具位置：`scripts/scan-archives.mjs`、`scripts/bing-search.mjs`；两者都带磁盘缓存，重复采集同一时段基本零成本。
 ## 使用
 
 安装并重启后，直接用自然语言触发：
@@ -255,11 +269,20 @@ pnpm install
 ```
 .
 ├── lib/
-│   ├── index.js        # 插件入口：注册技能与搜索工具
-│   ├── config.js       # 配置 schema（schemastery）
-│   ├── search-tool.js  # tech_daily_search 工具定义与通道路由
-│   ├── bing.js         # 免费通道：Bing RSS 适配（无需 Key）
-│   └── tavily.js       # Tavily HTTP 适配层
+│   ├── index.js          # 插件入口：注册技能、搜索工具与设置桥路由
+│   ├── client.js         # 设置页 GUI（浏览器端，plugins.row.config）
+│   ├── config.js         # 配置 schema（schemastery）
+│   ├── search-tool.js    # tech_daily_search 工具定义与通道路由
+│   ├── settings-store.js # 设置存储：原子写 + 历史快照 + 回退
+│   ├── settings-api.js   # 设置读写桥（同源回环校验）
+│   ├── custom-search.js  # 主题/博主链接 → 查询构造
+│   ├── bing.js           # 免费通道：Bing RSS 适配（无需 Key）
+│   └── tavily.js         # Tavily HTTP 适配层
+├── scripts/
+│   ├── test-settings.mjs # 存储、查询构造、桥接守卫的 15 个用例
+│   ├── test-client.mjs   # GUI bundle 加载与渲染冒烟
+│   ├── scan-archives.mjs # 归档页并发扫描
+│   └── verify-links.mjs  # 链接可达性校验
 ├── cordis.patch.yml    # bundle patch：声明插件行
 ├── package.json
 ├── LICENSE
