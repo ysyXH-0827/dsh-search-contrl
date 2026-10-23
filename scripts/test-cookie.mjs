@@ -239,6 +239,56 @@ await test('devToolsClient correlates replies by id', async () => {
 
 //#endregion
 
+
+await test('readCookies falls back to an attached page session', async () => {
+  const dir = tempDir();
+  const seen = [];
+  const capture = createCookieCapture({
+    dataDir: dir,
+    exists: () => true,
+    platform: 'win32',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ webSocketDebuggerUrl: 'ws://browser' }) }),
+    devToolsClient: () => ({
+      ready: Promise.resolve(),
+      send: async (method, params, sessionId) => {
+        seen.push(sessionId ? method + '@' + sessionId : method);
+        if (method === 'Storage.getCookies') throw new Error("'Storage.getCookies' wasn't found");
+        if (method === 'Target.getTargets') return { targetInfos: [{ type: 'page', targetId: 'T1' }] };
+        if (method === 'Target.attachToTarget') return { sessionId: 'S1' };
+        if (method === 'Network.getAllCookies') return { cookies: [sessionCookie('SESSDATA')] };
+        throw new Error('unexpected ' + method);
+      },
+      close: () => {},
+    }),
+  });
+  const cookies = await capture.readOnce(1234);
+  assert.equal(cookies.length, 1);
+  assert.equal(cookies[0].name, 'SESSDATA');
+  assert.deepEqual(seen, ['Storage.getCookies', 'Target.getTargets', 'Target.attachToTarget', 'Network.getAllCookies@S1']);
+});
+
+await test('a CDP method error is reported instead of looping until timeout', async () => {
+  const dir = tempDir();
+  const capture = createCookieCapture({
+    dataDir: dir,
+    exists: () => true,
+    platform: 'win32',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ webSocketDebuggerUrl: 'ws://browser' }) }),
+    devToolsClient: () => ({
+      ready: Promise.resolve(),
+      send: async () => { throw new Error("'Network.getAllCookies' wasn't found"); },
+      close: () => {},
+    }),
+    now: () => now,
+    sleepImpl: async () => {},
+  });
+  const result = await capture.start('bilibili');
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'cdp-error');
+  assert.match(result.message, /wasn't found/);
+  assert.equal(capture.status().state, 'error');
+});
+
 //#region bilibili
 await test('mixinKey is 32 chars and depends on both keys', () => {
   const a = mixinKey('7cd084941338484aae1ad9425b84077c', '4932caff0ff746eab6f01bf08b70ac45');
