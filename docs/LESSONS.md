@@ -121,3 +121,11 @@
 - **做法**：`scripts/test-client.mjs` 用 stub 的 `react`（`useState`/`useCallback`/`useEffect`/`createElement`）+ stub 的 `react/jsx-runtime` 造一个假 `require`，把 `lib/client.js` 源码用 `new Function('window', source)` 塞进假 `window.__ModuleLoader__`，然后断言 **模块 id、`exports.apply`/`exports.inject`、slot 名与 key、summary 文案、卡片树里的各 tab 与按钮文案、平台解析映射**。
 - **取舍**：这不是渲染测试，不验证像素与交互；验证的是「注册契约 + 结构 + 文案」，正好是插件装上后最容易炸、也最不容易在浏览器里定位的部分。
 - **规律**：**渲染进程代码也要有可自动化的契约测试**，否则每次改动都得重启 Host 人肉点一遍，回归成本高到不会去做。
+
+### 「设置里看不见」：plugins.row.config 不是设置侧边栏
+
+- **症状**：客户端 bundle 注册成功、插件行配置页也在，但用户在「设置」左侧导航里看不到任何东西。
+- **根因**：DSH 里这是两个不同的 slot。`plugins.row.config` 只挂到 **插件行**（设置 → 插件 → 该插件）的配置视图；要让条目出现在**设置窗口左侧的一级导航**，必须注册 `settings.section`。
+- **做法**：`ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: '<唯一 id>', order: <数值>, label: '搜索控制' }, Component))`；同时 `package.json` 的 `dsh.client.inject` 要声明 `@deepseek-ai/dsh-client-ui-settings` 与 `@deepseek-ai/dsh-client-ui-slots`，否则渲染进程拿不到设置窗口提供的运行环境。`order` 决定排序：已装插件的分区占 100–151，本插件取 152。
+- **保留两个入口**：同一张卡片同时挂 `settings.section`（一级分区，`page: true`）与 `plugins.row.config`（行配置页，summary 折叠形态），用户从哪进都能改。
+- **规律**：**"注册成功"不等于"出现在用户找的位置"**——交付前先问：用户会去哪个界面找它，那个界面对应哪个 slot？

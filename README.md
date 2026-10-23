@@ -155,7 +155,14 @@ pnpm install
 
 ## 设置页 GUI（自定义检索）
 
-插件在 **设置 → 插件 → tech-daily-report** 有一个配置页，用来替代手改 profile patch。三件事：
+入口有两个，指向同一份配置：
+
+| 入口 | 位置 | 形态 |
+|---|---|---|
+| **搜索控制**（主入口） | **设置 → 侧边栏「搜索控制」** | 一级分区，点进去直接是四个页签（`settings.section` slot，order 152） |
+| 插件行配置 | 设置 → 插件 → tech-daily-report | 同一张卡片的折叠/展开形态（`plugins.row.config` slot） |
+
+三件事：
 
 | 能力 | 怎么填 | 落到检索上的样子 |
 |---|---|---|
@@ -173,9 +180,9 @@ pnpm install
 
 **读写桥**：渲染进程通过 `/api/tech-daily-report-settings/{describe,save,rollback,reset,history,preview}` 访问 Host，全部 POST，只接受同源回环请求（跨站、非本机、非 POST 一律拒绝）。`preview` 只计算将发送的查询，不消耗 Tavily credit。
 
-**装完要重启**：客户端 bundle 由 Host 启动时扫描 `exports["./client"]` 加载，改完插件或升级版本后需**重启 DSH**，设置 → 插件 → tech-daily-report 才会出现配置页（面板热更新只在 `pnpm run dev:web` 下生效）。
+**装完要重启**：客户端 bundle 由 Host 启动时扫描 `exports["./client"]` 加载，改完插件或升级版本后需**重启 DSH**，设置 → 侧边栏「搜索控制」才会出现（面板热更新只在 `pnpm run dev:web` 下生效）。
 
-**插件版本回退**：仓库打了 tag，`v1.5.0`（含设置页）与 `v1.4.4`（最后一个无 GUI 版本）。退回旧版用 `git fetch --tags && git checkout v1.4.4`，或把 profile 里的依赖版本写回 `1.4.4` 再重启。设置数据存在插件目录之外，回退插件版本**不会**丢配置。
+**插件版本回退**：仓库打了 tag，`v1.5.2`（设置侧边栏「搜索控制」）、`v1.5.1`/`v1.5.0`（只有插件内配置页）与 `v1.4.4`（最后一个无 GUI 版本）。退回旧版用 `git fetch --tags && git checkout v1.4.4`，或把 profile 里的依赖版本写回 `1.4.4` 再重启。设置数据存在插件目录之外，回退插件版本**不会**丢配置。
 
 **Agent 侧用法**（不打开设置页也能用）：
 
