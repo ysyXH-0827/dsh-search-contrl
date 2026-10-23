@@ -5,6 +5,28 @@
 仓库：<https://github.com/ysyXH-0827/dsh-search-contrl> · 设置入口：DSH 设置 → 侧边栏「搜索控制」
 
 
+## 登录 Cookie（设置 → 搜索控制 → 登录 Cookie）
+
+平台 API（例如 B站空间、AI 视频总结）需要登录态才回答，搜索引擎只能看到收录页。这个页签把「登录」这一步做成三步点击，不需要复制粘贴 Cookie：
+
+| 步骤 | 动作 | 背后发生什么 |
+|---|---|---|
+| 1 | 点「获取 Cookie」 | Host 用**独立临时 profile** 启动 Chrome/Edge，打开该站登录页（不碰你日常浏览器数据） |
+| 2 | 你在窗口里正常登录 | Host 每 1.5 秒通过 DevTools 协议读一次 Cookie |
+| 3 | 检测到登录 Cookie 即关窗 | 只保留证明登录态的那几项，写入本机 `cookies.json`，并删除临时 profile |
+
+安全边界：
+
+- Cookie 值**永不回传页面**，设置页只显示名字、数量和保存时间（`前2***后2` 掩码）。
+- 文件权限 `0600`，位置 `~/.dsh/plugin-data/dsh-search-contrl/cookies.json`。
+- 单次捕获最长 5 分钟，超时自动关窗且不写入任何东西；同时只允许一个捕获会话（第二次会返回 `busy`）。
+- 找不到浏览器时明确提示，不会静默失败。
+
+支持站点：B站 `SESSDATA`、知乎 `z_c0`、微博 `SUB`、小红书 `web_session`、抖音 `sessionid`、X `auth_token`、YouTube `SID+SAPISID+LOGIN_INFO`、GitHub `user_session`。
+
+Agent 侧：`search_contrl` 的 `blogger` 动作识别到 `space.bilibili.com/<mid>` 会**直接调 B站空间 API**（有 Cookie 时还能读平台 AI 总结），拿到真正的“最新视频”而不是搜索收录页；`action:'cookie'` 可列出/清除已存会话。
+
+
 ## 2.0.0 改名：从 tech-daily-report 到 DSH-Search-Contrl
 
 技能与插件正式更名为 **DSH-Search-Contrl**（设置侧边栏名仍是「搜索控制」）。老名字的对应关系：

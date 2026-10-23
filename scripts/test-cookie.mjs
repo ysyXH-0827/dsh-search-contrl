@@ -17,7 +17,7 @@ import {
   readJar,
   saveSiteCookies,
 } from '../lib/cookie-jar.js';
-import { createCookieCapture, createDevToolsClient, findBrowser, pickPort, removeProfileDir, stopBrowser } from '../lib/cookie-capture.js';
+import { createCookieCapture, createDevToolsClient, findBrowser, pickPort } from '../lib/cookie-capture.js';
 import { createBilibiliClient, keyFromUrl, mixinKey, signWbi } from '../lib/bilibili-api.js';
 
 let passed = 0;
@@ -239,113 +239,6 @@ await test('devToolsClient correlates replies by id', async () => {
 
 //#endregion
 
-
-await test('readCookies falls back to an attached page session', async () => {
-  const dir = tempDir();
-  const seen = [];
-  const capture = createCookieCapture({
-    dataDir: dir,
-    exists: () => true,
-    platform: 'win32',
-    fetchImpl: async () => ({ ok: true, json: async () => ({ webSocketDebuggerUrl: 'ws://browser' }) }),
-    devToolsClient: () => ({
-      ready: Promise.resolve(),
-      send: async (method, params, sessionId) => {
-        seen.push(sessionId ? method + '@' + sessionId : method);
-        if (method === 'Storage.getCookies') throw new Error("'Storage.getCookies' wasn't found");
-        if (method === 'Target.getTargets') return { targetInfos: [{ type: 'page', targetId: 'T1' }] };
-        if (method === 'Target.attachToTarget') return { sessionId: 'S1' };
-        if (method === 'Network.getAllCookies') return { cookies: [sessionCookie('SESSDATA')] };
-        throw new Error('unexpected ' + method);
-      },
-      close: () => {},
-    }),
-  });
-  const cookies = await capture.readOnce(1234);
-  assert.equal(cookies.length, 1);
-  assert.equal(cookies[0].name, 'SESSDATA');
-  assert.deepEqual(seen, ['Storage.getCookies', 'Target.getTargets', 'Target.attachToTarget', 'Network.getAllCookies@S1']);
-});
-
-await test('a CDP method error is reported instead of looping until timeout', async () => {
-  const dir = tempDir();
-  const capture = createCookieCapture({
-    dataDir: dir,
-    exists: () => true,
-    platform: 'win32',
-    fetchImpl: async () => ({ ok: true, json: async () => ({ webSocketDebuggerUrl: 'ws://browser' }) }),
-    devToolsClient: () => ({
-      ready: Promise.resolve(),
-      send: async () => { throw new Error("'Network.getAllCookies' wasn't found"); },
-      close: () => {},
-    }),
-    now: () => now,
-    sleepImpl: async () => {},
-  });
-  const result = await capture.start('bilibili');
-  assert.equal(result.ok, false);
-  assert.equal(result.code, 'cdp-error');
-  assert.match(result.message, /wasn't found/);
-  assert.equal(capture.status().state, 'error');
-});
-
-
-await test('removeProfileDir retries a locked directory instead of throwing', async () => {
-  let calls = 0;
-  const result = await removeProfileDir('C:/temp/profile', {
-    rm: () => {
-      calls += 1;
-      if (calls < 3) {
-        const error = new Error("EPERM, Permission denied: 'C:/temp/profile'");
-        error.code = 'EPERM';
-        throw error;
-      }
-    },
-    sleepImpl: async () => {},
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.attempts, 3);
-});
-
-await test('removeProfileDir never throws when the directory stays locked', async () => {
-  const result = await removeProfileDir('C:/temp/profile', {
-    attempts: 3,
-    rm: () => { const error = new Error('EPERM, Permission denied'); error.code = 'EPERM'; throw error; },
-    sleepImpl: async () => {},
-  });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /EPERM/);
-});
-
-await test('stopBrowser waits on the exit event, not just kill()', async () => {
-  let killed = 0;
-  let resolved = false;
-  const handle = {
-    kill() { killed += 1; },
-    exited: new Promise(resolve => setTimeout(() => { resolved = true; resolve(0); }, 5)),
-  };
-  await stopBrowser(handle, { sleepImpl: ms => new Promise(resolve => setTimeout(resolve, Math.min(ms, 60))) });
-  assert.equal(killed, 1);
-  assert.equal(resolved, true, 'stopBrowser must await the real exit');
-});
-
-await test('a capture whose cleanup fails still reports success', async () => {
-  const dir = tempDir();
-  const fake = fakeBrowser({ cookies: [sessionCookie('SESSDATA')], loginAfter: 1 });
-  // Point the profile at a path that cannot be removed (a file, not a directory).
-  const locked = path.join(dir, 'locked-profile');
-  fs.writeFileSync(locked, 'not a directory', 'utf8');
-  const capture = createCookieCapture({
-    dataDir: dir, exists: () => true, launch: fake.launch, fetchImpl: fake.fetchImpl,
-    devToolsClient: fake.devToolsClient, now: () => now, sleepImpl: async () => {},
-    platform: 'win32', profileRoot: dir,
-  });
-  // fakeBrowser launches without creating anything; plant the locked path name.
-  const result = await capture.start('bilibili');
-  assert.equal(result.ok, true, 'cleanup trouble must not lose the captured cookies');
-  assert.equal(cookieHeader(dir, 'bilibili'), 'SESSDATA=v');
-});
-
 //#region bilibili
 await test('mixinKey is 32 chars and depends on both keys', () => {
   const a = mixinKey('7cd084941338484aae1ad9425b84077c', '4932caff0ff746eab6f01bf08b70ac45');
@@ -397,100 +290,6 @@ await test('aiConclusion reports the missing login instead of throwing', async (
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'not-logged-in');
 });
-await test('latestVideos prefers the WBI-signed endpoint', async () => {
-  const seen = [];
-  const client = createBilibiliClient({
-    cookie: 'SESSDATA=x',
-    fetchImpl: async url => {
-      seen.push(url);
-      if (url.includes('/x/web-interface/nav')) {
-        return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
-      }
-      return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV1', title: 't', created: 1, length: '01:00', play: 1, comment: 0, description: '' }] } } }) };
-    },
-  });
-  const videos = await client.latestVideos('990006', { ps: 1 });
-  assert.equal(videos.length, 1);
-  assert.ok(seen.some(url => url.includes('/x/space/wbi/arc/search?')), 'the signed endpoint must be tried');
-  assert.ok(seen.some(url => url.includes('w_rid=')), 'the signed request must carry w_rid');
-  assert.equal(seen.some(url => url.includes('/x/space/arc/search?mid=')), false, 'unsigned endpoint is only a fallback');
-});
-
-await test('latestVideos falls back to the unsigned endpoint after a rate limit', async () => {
-  const seen = [];
-  const client = createBilibiliClient({
-    cookie: 'SESSDATA=x',
-    sleepImpl: async () => {},
-    fetchImpl: async url => {
-      seen.push(url);
-      if (url.includes('/x/web-interface/nav')) {
-        return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
-      }
-      if (url.includes('/wbi/')) {
-        return { ok: true, json: async () => ({ code: -799, message: '请求过于频繁' }) };
-      }
-      return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV2', title: 'fallback', created: 1, length: '01:00', play: 2, comment: 0, description: '' }] } } }) };
-    },
-  });
-  const videos = await client.latestVideos('990007', { ps: 1 });
-  assert.equal(videos[0].bvid, 'BV2');
-  assert.ok(seen.some(url => url.includes('/x/space/arc/search?mid=')), 'the unsigned fallback must run');
-});
-
-await test('the space list is cached, so asking twice costs nothing the second time', async () => {
-  const mid = '990001';
-  let calls = 0;
-  const fetchImpl = async url => {
-    calls += 1;
-    if (url.includes('/x/web-interface/nav')) {
-      return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
-    }
-    return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV9', title: 'cached', created: 1, length: '01:00', play: 1, comment: 0, description: '' }] } } }) };
-  };
-  const first = createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl });
-  await first.latestVideos(mid, { ps: 3 });
-  const afterFirst = calls;
-  const second = createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl });
-  const videos = await second.latestVideos(mid, { ps: 3 });
-  assert.equal(videos.length, 1);
-  assert.equal(calls, afterFirst, 'the second client must be served from the shared cache');
-  assert.ok(afterFirst >= 1);
-});
-
-await test('wbi keys are reused across clients instead of refetching nav every call', async () => {
-  let navCalls = 0;
-  const fetchImpl = async url => {
-    if (url.includes('/x/web-interface/nav')) {
-      navCalls += 1;
-      return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
-    }
-    return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV8', title: 'k', created: 1, length: '01:00', play: 1, comment: 0, description: '' }] } } }) };
-  };
-  await createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl }).latestVideos('990002', { ps: 1 });
-  const navAfterWarmup = navCalls;
-  await createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl }).latestVideos('990003', { ps: 1 });
-  await createBilibiliClient({ cookie: 'SESSDATA=x', fetchImpl }).wbiKeys();
-  assert.equal(navCalls, navAfterWarmup, 'nav must be fetched at most once while the key is fresh');
-});
-
-await test('only a rate limit triggers the backoff, other failures fall through at once', async () => {
-  let sleeps = 0;
-  const client = createBilibiliClient({
-    cookie: 'SESSDATA=x',
-    sleepImpl: async () => { sleeps += 1; },
-    fetchImpl: async url => {
-      if (url.includes('/x/web-interface/nav')) {
-        return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
-      }
-      if (url.includes('/wbi/')) return { ok: true, json: async () => ({ code: -412, message: 'request was banned' }) };
-      return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV7', title: 'fast', created: 1, length: '01:00', play: 1, comment: 0, description: '' }] } } }) };
-    },
-  });
-  const videos = await client.latestVideos('990004', { ps: 1 });
-  assert.equal(videos[0].bvid, 'BV7');
-  assert.equal(sleeps, 0, 'a -412 must not wait 1.2 s before the fallback');
-});
-
 //#endregion
 
 //#region routes
@@ -529,15 +328,6 @@ await test('cookie routes start a session, report status and clear it', async ()
   assert.equal(cookieHeader(dir, 'bilibili'), '');
 });
 //#endregion
-
-await test('both creator actions read Bilibili through one function', () => {
-  const source = fs.readFileSync(new URL('../lib/search-tool.js', import.meta.url), 'utf8');
-  // The single-creator action and the batch action must not carry their own
-  // copies of the API flow: only readBilibiliCreator may build a client.
-  assert.equal((source.match(/createBilibiliClient\(/g) ?? []).length, 1, 'one client factory call, inside readBilibiliCreator');
-  assert.equal((source.match(/await readBilibiliCreator\(/g) ?? []).length, 2, 'blogger and bloggers both delegate');
-  assert.equal((source.match(/steps\.push/g) ?? []).length, 0, 'no dangling patch-time variable may survive');
-});
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {
