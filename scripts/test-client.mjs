@@ -139,11 +139,14 @@ for (const expected of [
   '主题',
   '博主',
   '历史版本',
+  '登录 Cookie',
   '已保存',
   '清空自定义项',
 ]) {
   assert.ok(text.includes(expected), `the rendered card must contain "${expected}"`);
 }
+
+assert.equal(typeof exports.CookiePanel, 'function', 'the cookie panel must be exported');
 
 const link = exports.describeLink('https://space.bilibili.com/123456');
 assert.equal(link.domain, 'bilibili.com');
