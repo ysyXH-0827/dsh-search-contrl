@@ -51,5 +51,14 @@
       ],
       "platform": "web"
     }
+  },
+  "displayName": "DSH-Search-Contrl",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ysyXH-0827/dsh-search-contrl.git"
+  },
+  "homepage": "https://github.com/ysyXH-0827/dsh-search-contrl#readme",
+  "bugs": {
+    "url": "https://github.com/ysyXH-0827/dsh-search-contrl/issues"
   }
 }

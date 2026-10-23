@@ -11,8 +11,8 @@
 
 $ErrorActionPreference = 'Stop'
 
-$RepoDir  = 'C:\Users\ini\Downloads\dsh\dsh-tech-daily-report'
-$RepoName = 'dsh-tech-daily-report'
+$RepoDir  = 'C:\Users\ini\Downloads\dsh\dsh-search-contrl'
+$RepoName = 'dsh-search-contrl'
 $Owner    = 'ysyXH-0827'
 
 function Step($n, $text) {
