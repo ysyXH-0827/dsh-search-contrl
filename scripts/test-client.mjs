@@ -70,7 +70,7 @@ const source = fs.readFileSync(bundlePath, 'utf8');
 new Function('window', source)(globalThis.window);
 
 assert.ok(loaded, 'the bundle must call window.__ModuleLoader__.load');
-assert.equal(loaded.id, 'dsh-tech-daily-report', 'the module id must match the package name');
+assert.equal(loaded.id, 'dsh-search-contrl', 'the module id must match the package name');
 
 const exports = loaded.factory(browserRequire);
 assert.equal(typeof exports.apply, 'function', 'the client must export apply');
@@ -96,18 +96,18 @@ assert.deepEqual(injected, ['settings.section', 'plugins.row.config'], 'apply() 
 
 const section = registrations.find(item => item.meta.name === 'settings.section');
 assert.ok(section, 'the first-level settings section「搜索控制」must be registered');
-assert.equal(section.meta.id, 'tech-daily-report-search-control');
+assert.equal(section.meta.id, 'search-contrl-settings');
 assert.equal(section.meta.label, '搜索控制');
 assert.equal(typeof section.meta.order, 'number', 'the section needs a numeric nav order');
 assert.ok(section.meta.order > 151, 'the section must sit after the bundled plugin sections (100–151)');
 
 const row = registrations.find(item => item.meta.name === 'plugins.row.config');
 assert.ok(row, 'apply() must keep registering the plugin row config page');
-assert.equal(row.meta.key, 'dsh-tech-daily-report#tech-daily-report');
+assert.equal(row.meta.key, 'dsh-search-contrl#search-contrl');
 
 const summary = row.render({ view: 'summary' });
 assert.equal(typeof summary, 'string', 'the summary view must be plain text');
-assert.match(summary, /科技日报/);
+assert.match(summary, /DSH-Search-Contrl/, 'the row summary must name the plugin');
 
 const sectionCard = section.render();
 assert.ok(sectionCard && typeof sectionCard === 'object', 'the settings section must render an element');
@@ -132,7 +132,7 @@ assert.match(String(card.props.className), /tdr-card/);
 
 const text = textOf(card);
 for (const expected of [
-  '科技日报 · 自定义检索',
+  'DSH-Search-Contrl',
   '未配置自定义项，报告按固定六板块执行',
   '正在读取设置…',
   '搜索源',

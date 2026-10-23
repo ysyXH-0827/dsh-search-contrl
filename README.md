@@ -1,6 +1,22 @@
-# dsh-tech-daily-report
+# dsh-search-contrl
 
-一个 DSH 插件，为 [DSH (DeepSeek Harness)](https://github.com/) 注册「科技日报」技能：生成中文科技日报、指定日期范围的日报，或一周科技新闻总结。
+一个 DSH 插件，为 [DSH (DeepSeek Harness)](https://github.com/) 注册「DSH-Search-Contrl」技能：检索并生成中文日报、指定日期范围的日报，或一周科技新闻总结。
+
+## 2.0.0 改名：从 tech-daily-report 到 DSH-Search-Contrl
+
+技能与插件正式更名为 **DSH-Search-Contrl**（设置侧边栏名仍是「搜索控制」）。老名字的对应关系：
+
+| 位置 | 2.0.0 之前 | 2.0.0 |
+|---|---|---|
+| npm 包 | `dsh-tech-daily-report` | `dsh-search-contrl` |
+| 技能名 | `tech-daily-report` | `dsh-search-contrl` |
+| 工具名 | `tech_daily_search` | `search_contrl` |
+| patch 行 id | `tech-daily-report` | `search-contrl` |
+| 设置分区 id | `tech-daily-report-search-control` | `search-contrl-settings` |
+| 桥前缀 | `/api/tech-daily-report-settings` | `/api/search-contrl-settings` |
+| 数据目录 | `~/.dsh/plugin-data/dsh-tech-daily-report` | `~/.dsh/plugin-data/dsh-search-contrl` |
+
+升级要做的三件事：① profile `package.json` 的依赖键与 `dsh.profile.bundles` 改成 `dsh-search-contrl`；② `cordis.patch.yml` 的行 id 改成 `search-contrl`、name 改成 `dsh-search-contrl`；③ 重启 DSH。旧数据目录不会被自动迁移，需要保留配置就手工把 `settings.json` 与 `history/` 复制到新目录。
 
 输出覆盖六个固定板块，每个板块都要播报可核验的成就与关键指标：
 
@@ -17,7 +33,7 @@
 
 - **日期范围灵活** — 只说「来一份日报」出当天日报；给出起止日期则按区间整理；说「本周」按自然周周一至周日；说「最近 7 天」按连续 7 个自然日。
 - **成就播报有硬性口径** — 每条成就必须写明主体、指标、数值、单位、统计口径、时间范围和成就级别（世界/行业/公司/阶段性）。没有可靠数据时明确写「暂无已确认的新成就」，不允许用宣传口号替代，也不允许在口径不清时使用「全球第一」「创纪录」这类绝对表述。
-- **双通道搜索，默认免费** — 注册 `tech_daily_search`：默认走免费的 Bing RSS 通道（无需 Key，只返回摘要），配置 Tavily Key 后可切到付费通道拿到 AI 答案与正文提取；`provider: "auto"` 先免费、失败才回退。提取结果按 URL 缓存 24 小时，Tavily 额度超限时短暂熔断而不是继续扣费。
+- **双通道搜索，默认免费** — 注册 `search_contrl`：默认走免费的 Bing RSS 通道（无需 Key，只返回摘要），配置 Tavily Key 后可切到付费通道拿到 AI 答案与正文提取；`provider: "auto"` 先免费、失败才回退。提取结果按 URL 缓存 24 小时，Tavily 额度超限时短暂熔断而不是继续扣费。
 - **渠道矩阵而非单一搜索** — 技能内置各板块的官方与监管渠道清单（品牌官网新品页、工信部新车申报公示与 3C 认证、GitHub/Hugging Face 模型卡、arXiv、NHTSA、FIA 等），并要求逐项尝试。
 - **「暂无」有判定门槛** — 只有在官网、监管备案、行业媒体三类渠道都无记录，且列出实际检查过的渠道清单与受限原因时，才允许写「暂无」。禁止把「我没查到」表述成「不存在」。
 - **团队采集有协议** — 跨板块、跨多日采集默认智能体团队并行：先造并发检索工具、一人一文件、任务自包含、Lead 复核、失败补位、列表页直连判定，并在每次采集后把踩坑写回技能并推送。
@@ -31,7 +47,7 @@
 ```json
 {
   "dependencies": {
-    "dsh-tech-daily-report": "link:./plugins/dsh-tech-daily-report"
+    "dsh-search-contrl": "link:./plugins/dsh-search-contrl"
   }
 }
 ```
@@ -49,7 +65,7 @@ pnpm install
 ```json
 {
   "dependencies": {
-    "dsh-tech-daily-report": "github:你的用户名/dsh-tech-daily-report"
+    "dsh-search-contrl": "github:你的用户名/dsh-search-contrl"
   }
 }
 ```
@@ -59,8 +75,8 @@ pnpm install
 插件自带 bundle patch，安装后会自动插入插件行。若需自定义配置，在你的 profile `cordis.patch.yml` 中加入：
 
 ```yaml
-- id: tech-daily-report
-  name: dsh-tech-daily-report
+- id: search-contrl
+  name: dsh-search-contrl
   config:
     tavilyApiKey: ""
     searchDepth: basic
@@ -92,7 +108,7 @@ pnpm install
 
 ## 搜索工具
 
-无论是否配置 Key，插件都会注册 `tech_daily_search`；默认先用免费的 Bing 通道：
+无论是否配置 Key，插件都会注册 `search_contrl`；默认先用免费的 Bing 通道：
 
 **免费检索（Bing RSS，无需 Key）**
 
@@ -160,7 +176,7 @@ pnpm install
 | 入口 | 位置 | 形态 |
 |---|---|---|
 | **搜索控制**（主入口） | **设置 → 侧边栏「搜索控制」** | 一级分区，点进去直接是四个页签（`settings.section` slot，order 152） |
-| 插件行配置 | 设置 → 插件 → tech-daily-report | 同一张卡片的折叠/展开形态（`plugins.row.config` slot） |
+| 插件行配置 | 设置 → 插件 → DSH-Search-Contrl | 同一张卡片的折叠/展开形态（`plugins.row.config` slot） |
 
 三件事：
 
@@ -176,9 +192,9 @@ pnpm install
 
 **版本可回退**：每次保存、重置、回退都会先把**被替换的那一版**写进历史，再写新版本；所以回退本身也能再回退，不存在「点错一次就回不去」。默认保留 20 个版本，用 `historyLimit` 调整。
 
-**数据落在哪**：`~/.dsh/plugin-data/dsh-tech-daily-report/settings.json`，历史在同目录 `history/`。不写 profile 的 patch 文件——GUI 不该改写 Host 合成出来的配置层；自带存储才能保证每次写入都可回退。可用 `TECH_DAILY_REPORT_DATA_DIR` 改目录。
+**数据落在哪**：`~/.dsh/plugin-data/dsh-search-contrl/settings.json`，历史在同目录 `history/`。不写 profile 的 patch 文件——GUI 不该改写 Host 合成出来的配置层；自带存储才能保证每次写入都可回退。可用 `SEARCH_CONTRL_DATA_DIR` 改目录。
 
-**读写桥**：渲染进程通过 `/api/tech-daily-report-settings/{describe,save,rollback,reset,history,preview}` 访问 Host，全部 POST，只接受同源回环请求（跨站、非本机、非 POST 一律拒绝）。`preview` 只计算将发送的查询，不消耗 Tavily credit。
+**读写桥**：渲染进程通过 `/api/search-contrl-settings/{describe,save,rollback,reset,history,preview}` 访问 Host，全部 POST，只接受同源回环请求（跨站、非本机、非 POST 一律拒绝）。`preview` 只计算将发送的查询，不消耗 Tavily credit。
 
 **装完要重启**：客户端 bundle 由 Host 启动时扫描 `exports["./client"]` 加载，改完插件或升级版本后需**重启 DSH**，设置 → 侧边栏「搜索控制」才会出现（面板热更新只在 `pnpm run dev:web` 下生效）。
 
@@ -248,15 +264,15 @@ pnpm install
 安装并重启后，直接用自然语言触发：
 
 - 「来一份日报」/「发日报」/「今日科技新闻」→ 当天日报
-- 「从 10 月 1 日到 10 月 7 日的科技日报」→ 指定区间
+- 「从 10 月 1 日到 10 月 7 日的日报」→ 指定区间
 - 「本周科技总结」/「最近 7 天科技新闻」→ 按周或最近 7 天
 - 「再发一次」→ 重新检索并完整输出
 
-也可以显式调用技能 `tech-daily-report`。
+也可以显式调用技能 `dsh-search-contrl`。
 
 ## 输出格式
 
-标题为 `科技日报｜YYYY-MM-DD`、`科技日报｜YYYY-MM-DD 至 YYYY-MM-DD` 或 `科技周报｜YYYY-MM-DD 至 YYYY-MM-DD`。
+标题为 `检索日报｜YYYY-MM-DD`、`检索日报｜YYYY-MM-DD 至 YYYY-MM-DD`、`检索周报｜YYYY-MM-DD 至 YYYY-MM-DD`，或按配置主题命名（如 `AI 日报｜YYYY-MM-DD`）。
 
 开头是一段不超过 80 字的「今日要点」或「本周判断」，随后按六个板块输出 8 至 16 条。每条包含：
 
@@ -285,7 +301,7 @@ pnpm install
 │   ├── index.js          # 插件入口：注册技能、搜索工具与设置桥路由
 │   ├── client.js         # 设置页 GUI（浏览器端，plugins.row.config）
 │   ├── config.js         # 配置 schema（schemastery）
-│   ├── search-tool.js    # tech_daily_search 工具定义与通道路由
+│   ├── search-tool.js    # search_contrl 工具定义与通道路由
 │   ├── settings-store.js # 设置存储：原子写 + 历史快照 + 回退
 │   ├── settings-api.js   # 设置读写桥（同源回环校验）
 │   ├── custom-search.js  # 主题/博主链接 → 查询构造

@@ -112,7 +112,7 @@
 
 - **结果**：新增渲染进程配置页，支持自定义搜索源、自定义主题（不限科技）、博主主页链接定向检索；所有写入都可回退。
 - **可回退的实现**：不是「保存前备份」，而是 **保存时先把被替换的旧版本写进 `history/<ISO>.json`，再写 `settings.json`**；重置与回退走同一条路径 —— 于是「回退」这个动作本身也会被快照，点错一次还能再退回来。
-- **不写 profile patch 的原因**：profile 的 `cordis.patch.yml` 是 Host 合成的配置层，插件运行期改写它等于让 Host 和插件同时改同一份文件，冲突无解；自带 `settings.json` + 历史目录才是可回退的边界。数据目录 `~/.dsh/plugin-data/<id>/`，可用 `TECH_DAILY_REPORT_DATA_DIR` 覆盖。
+- **不写 profile patch 的原因**：profile 的 `cordis.patch.yml` 是 Host 合成的配置层，插件运行期改写它等于让 Host 和插件同时改同一份文件，冲突无解；自带 `settings.json` + 历史目录才是可回退的边界。数据目录 `~/.dsh/plugin-data/<id>/`，可用 `SEARCH_CONTRL_DATA_DIR` 覆盖。
 - **规律**：**凡是要「可回退」的功能，回退动作本身必须被记录**；只备份写前状态的回退是一次性的。
 
 ### 无浏览器怎么测渲染进程 bundle
@@ -129,3 +129,13 @@
 - **做法**：`ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: '<唯一 id>', order: <数值>, label: '搜索控制' }, Component))`；同时 `package.json` 的 `dsh.client.inject` 要声明 `@deepseek-ai/dsh-client-ui-settings` 与 `@deepseek-ai/dsh-client-ui-slots`，否则渲染进程拿不到设置窗口提供的运行环境。`order` 决定排序：已装插件的分区占 100–151，本插件取 152。
 - **保留两个入口**：同一张卡片同时挂 `settings.section`（一级分区，`page: true`）与 `plugins.row.config`（行配置页，summary 折叠形态），用户从哪进都能改。
 - **规律**：**"注册成功"不等于"出现在用户找的位置"**——交付前先问：用户会去哪个界面找它，那个界面对应哪个 slot？
+
+### 改名是一次跨层重构，不是 sed
+
+把 `tech-daily-report` 改成 `DSH-Search-Contrl` 时，一个名字同时出现在 **7 个不相干的层**：npm 包名、技能注册名、工具名（模型可见）、patch 行 id（profile 配置）、客户端 slot id、HTTP 桥前缀、数据目录路径。漏掉任何一层都不是「显示不对」，而是**整条链路断掉**——桥前缀只改服务端，设置页所有请求 404；只改客户端 bundle 的 module id，loader 按包名找不到模块。
+
+两个踩过的坑：
+- 批量替换要**长串优先**。先替换 `tech-daily-report` 再替换更长的 `tech-daily-report-search-control`，后者永远不会命中，只会留下 `search-contrl-search-control` 这种怪 id。顺序错了测试会抓到，但要先写断言。
+- 改完必须同时验证**单侧自洽**和**跨侧一致**：客户端与服务端各 grep 一次桥前缀，测试里断言 `settings.section` 的 id、row key、module id、包名四处同名。
+
+规律：**重命名后先跑一次"名字矩阵"检查**（每个名字至少两处引用：定义处 + 使用处），比逐个回忆哪里用过可靠。

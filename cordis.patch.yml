@@ -1,4 +1,4 @@
 # Registers the technology daily report skill at runtime.
 - insert:
-    - id: tech-daily-report
-      name: dsh-tech-daily-report
+    - id: search-contrl
+      name: dsh-search-contrl

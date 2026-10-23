@@ -1,7 +1,7 @@
 {
-  "name": "dsh-tech-daily-report",
-  "version": "1.5.2",
-  "description": "Chinese technology daily report skill for DSH with a settings GUI: custom search sources, arbitrary topics beyond tech, creator-link scoped search, and one-click rollback of the settings.",
+  "name": "dsh-search-contrl",
+  "version": "2.0.0",
+  "description": "DSH-Search-Contrl: a DSH skill/plugin for scoped web search and Chinese daily reports, with a settings GUI for custom search sources, arbitrary topics (not only tech), creator-link scoped search, and one-click rollback.",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
@@ -25,13 +25,11 @@
     "dsh-plugin",
     "cordis",
     "skill",
-    "technology",
-    "news",
+    "search",
+    "search-control",
     "daily-report",
-    "tavily",
-    "settings-ui",
-    "custom-topics",
-    "creator-search"
+    "creator-search",
+    "settings-ui"
   ],
   "license": "MIT",
   "peerDependencies": {
