@@ -13,7 +13,7 @@ import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createCookieCapture } from '../lib/cookie-capture.js';
+import { createCookieCapture, removeProfileDir, stopBrowser } from '../lib/cookie-capture.js';
 
 const port = await new Promise(resolve => {
   const server = net.createServer();
@@ -39,6 +39,22 @@ const child = spawn(browser.path, [
   `--user-data-dir=${profileDir}-browser`,
   '--no-first-run', '--no-default-browser-check', '--headless=new', 'about:blank',
 ], { stdio: 'ignore' });
+
+// Mirror the production handle so teardown exercises the same code path as a
+// real capture (including the Windows EPERM window).
+const handle = {
+  pid: child.pid,
+  exited: new Promise(resolve => {
+    let done = false;
+    const finish = value => { if (!done) { done = true; resolve(value); } };
+    child.on('exit', finish);
+    child.on('close', finish);
+    setTimeout(() => finish(null), 15_000);
+  }),
+  kill() {
+    try { spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { child.kill(); }
+  },
+};
 
 async function devtoolsUrl() {
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -102,10 +118,15 @@ try {
   if (found.value !== 'smoke-value') throw new Error('cookie value mismatch');
   console.log('SMOKE OK');
   browserClient.close();
+  // Prove the cleanup path: right after a tree kill the profile directory is
+  // still locked on Windows, which is what produced the user's EPERM report.
+  await stopBrowser(handle);
+  const cleanup = await removeProfileDir(`${profileDir}-browser`);
+  console.log('cleanup ok =', cleanup.ok, '(attempts', cleanup.attempts + ')');
+  if (!cleanup.ok) throw new Error('profile cleanup failed: ' + cleanup.error);
+  console.log('CLEANUP OK');
 } finally {
-  child.kill();
-  await sleep(400);
-  for (const dir of [profileDir, `${profileDir}-browser`]) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  await stopBrowser(handle).catch(() => {});
+  await removeProfileDir(profileDir, { attempts: 4 });
+  await removeProfileDir(`${profileDir}-browser`, { attempts: 4 });
 }

@@ -176,3 +176,66 @@
 3. 加 `scripts/smoke-cdp.mjs`：真的开一个浏览器、真的种一个 SESSDATA、再让读取器找回来。单测只能证明逻辑，证明不了浏览器行为。
 
 规律：**凡是依赖外部程序协议的功能，必须有"真进程烟测"，且错误分类要区分"还没好"与"永远不会好"。**
+
+
+### 2.1.2 「EPERM, Permission denied」：杀进程≠目录已释放
+
+症状：点「获取 Cookie」、登录成功，界面却报
+`EPERM, Permission denied: \\?\C:\Users\...\Temp\dsh-search-contrl-bilibili-1792765757383`。
+
+根因不是权限配置，是时序：
+
+| 步骤 | 实际发生的事 |
+| --- | --- |
+| `handle.kill()` | 只杀了浏览器主进程 |
+| 紧接着 `fs.rmSync(profileDir)` | Edge 的 renderer / GPU / crashpad helper 还持有该目录 → EPERM |
+| `finally` 里抛出 | 覆盖了已经成功的读取结果，用户只看到裸错误 |
+
+修法（三条一起才完整）：
+
+1. **等真正退出再删**：`defaultLaunch` 返回 `exited` Promise（`exit`/`close` 事件 + 15s 兜底），`stopBrowser()` 先 kill 再 `Promise.race([exited, sleep(6s)])`。
+2. **Windows 要杀进程树**：`spawn('taskkill', ['/PID', pid, '/T', '/F'])`；只 `child.kill()` 会留下持有句柄的 helper。
+3. **清理失败不许影响结果**：`removeProfileDir()` 指数退避重试 8 次（250ms×attempt），永不抛，失败只写进 `state.cleanup`；下次捕获开头用 `sweepProfiles()` 清超过 30 分钟的残留。
+
+规律：**清理是 best-effort，捕获结果才是交付物。** 任何 teardown 都不得把成功结果改写成失败。
+
+烟测要覆盖清理：`scripts/smoke-cdp.mjs` 现在真开 Edge、真种 Cookie、读完后再走 `stopBrowser` + `removeProfileDir`，输出 `cleanup ok = true` 与 `CLEANUP OK`。
+
+
+### 2.1.3 「博主最新视频」拿不到：签名接口才是可靠路径
+
+症状：登录 Cookie 已存好，`action:'blogger'` 却退回搜索引擎结果，拿不到真正的最新视频。
+
+两个独立故障叠在一起：
+
+| 故障 | 证据 | 修法 |
+| --- | --- | --- |
+| 未签名的 `x/space/arc/search` 被风控 | `{"code":-799,"message":"请求过于频繁"}`（已登录也一样） | 改走 **WBI 签名** 的 `x/space/wbi/arc/search`，并带上 `dm_img_list`/`dm_img_str`/`dm_cover_img_str` 指纹占位参数；未签名版只作兜底，中间退避 1.2s |
+| 补丁插错分支 | 快速路径文本同时匹配到 topic 与 blogger 两处锚点，topic 分支里多出一份引用 `steps`/`blogger` 的死代码 → `steps is not defined` | 补丁只替换首处 / 用唯一锚点；加静态回归测试断言 `createBilibiliClient({ cookie: cookieHeader })` 只出现 1 次、`steps.push` 为 0 |
+
+登录态带来的额外收获：`view/conclusion/get`（同样要 WBI 签名）能拿到平台 AI 总结——这只在登录 Cookie 下可用，匿名访问返回 `-101`。
+
+规律：**外部 API 的"公开"端点不等于"可用"端点**；风控靠签名而不只是 Cookie，所以签名逻辑要跟登录态一起做。
+
+### 2.1.4 「速度有点慢」：缓存放错了层，退避不分错误类型
+
+用户反馈一句话：“速度有点慢”。实测冷启动一次「博主最新视频 + AI 总结」的分解：
+
+| 步骤 | 耗时 | 是否必要 |
+| --- | --- | --- |
+| `nav` 取 WBI 密钥 | 113 ms | 每 10 分钟一次就够 |
+| `x/space/wbi/arc/search` 列表 | 352 ms | 60 秒内可复用 |
+| `x/web-interface/view` 详情 | 72 ms | 同一条视频可复用 |
+| `view/conclusion/get` AI 总结 | 181 ms | 同一条视频可复用 |
+
+三个真实原因：
+
+1. **缓存放错层**：`createBilibiliClient` 每次工具调用都新建，缓存挂在实例上等于没有缓存；
+2. **AI 总结又取了一次 `nav`**：`latestVideos` 取过密钥，`aiConclusion` 再取一次，白花 113 ms；
+3. **退避不分错误**：签名请求失败后无条件 `sleepImpl(1200)` 再回退，只有 `-799`（频率限制）值得等，`-412` 这类风控拒绝应当立刻走下一步。
+
+修法：缓存提到**模块级**（密钥 10 分钟、列表 60 秒、详情/总结 10 分钟）、密钥用 `Promise` 记忆化、`await sleepImpl(1200)` 用 `if (message.includes('-799'))` 包起来。
+
+效果：冷启动 803 ms（4 个必要请求），同一问答第二次 1 ms。
+
+规律：**缓存的位置必须和“调用粒度”对齐**——工具每次调用都新建对象时，实例内缓存等于装饰。
