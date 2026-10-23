@@ -1,6 +1,6 @@
 {
   "name": "dsh-search-contrl",
-  "version": "2.1.4",
+  "version": "2.1.5",
   "description": "DSH-Search-Contrl: a DSH skill/plugin for scoped web search and Chinese daily reports, with a settings GUI for custom search sources, arbitrary topics (not only tech), creator-link scoped search, and one-click rollback.",
   "private": false,
   "type": "module",
@@ -8,7 +8,8 @@
   "scripts": {
     "check": "node --check lib/index.js && node --check lib/search-tool.js && node --check lib/config.js && node --check lib/custom-search.js && node --check lib/settings-store.js && node --check lib/settings-api.js && node --check lib/client.js && node --check lib/cookie-jar.js && node --check lib/cookie-capture.js && node --check lib/bilibili-api.js",
     "test": "node scripts/test-settings.mjs && node scripts/test-client.mjs && node scripts/test-cookie.mjs",
-    "smoke": "node scripts/smoke-cdp.mjs"
+    "smoke": "node scripts/smoke-cdp.mjs",
+    "prepack": "node scripts/prepack.mjs"
   },
   "exports": {
     ".": "./lib/index.js",
@@ -61,5 +62,13 @@
   "homepage": "https://github.com/ysyXH-0827/dsh-search-contrl#readme",
   "bugs": {
     "url": "https://github.com/ysyXH-0827/dsh-search-contrl/issues"
+  },
+  "author": "ysyXH-0827",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

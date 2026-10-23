@@ -65,7 +65,41 @@ Agent 侧：`search_contrl` 的 `blogger` 动作识别到 `space.bilibili.com/<m
 
 ## 安装
 
-### 方式一：本地目录（开发调试）
+### 方式一：npm（推荐）
+
+```bash
+# 在 DSH profile 目录执行
+pnpm add dsh-search-contrl
+```
+
+包名 `dsh-search-contrl`，当前版本 **2.1.5**。没有 npm 账号或想锁定版本时，直接从 GitHub tag 装，效果一样：
+
+```bash
+pnpm add https://codeload.github.com/ysyXH-0827/dsh-search-contrl/tar.gz/refs/tags/v2.1.5
+```
+
+两种方式都必须同时在 profile 的 `package.json` 里登记到 bundles，否则插件不会被加载：
+
+```json
+{
+  "dependencies": { "dsh-search-contrl": "^2.1.5" },
+  "dsh": { "profile": { "bundles": ["...", "dsh-search-contrl"] } }
+}
+```
+
+`cordis.patch.yml` 随包安装（`files` 白名单包含它），插件的 `id: search-contrl` 和设置页文案都来自这份 patch。打包内容可用 `pnpm pack` 自查：正常只有 `lib/`（12 个文件）、`cordis.patch.yml`、`README.md`、`LICENSE`、`package.json`，约 79 KB。
+
+### 方式二：从 git 安装（等价写法）
+
+```json
+{
+  "dependencies": {
+    "dsh-search-contrl": "github:ysyXH-0827/dsh-search-contrl"
+  }
+}
+```
+
+### 方式三：本地目录（开发调试）
 
 把仓库放到你的 DSH profile 目录内，然后在 profile 的 `package.json` 里链接它：
 
@@ -84,16 +118,6 @@ pnpm install
 ```
 
 > **重要：** 请将插件放在 profile 目录**内部**（如上例的 `plugins/` 子目录）。插件依赖 `@deepseek-ai/schemastery`，Node 需要从插件目录向上查找 profile 的 `node_modules` 才能解析；放在 profile 树外会导致 `ERR_MODULE_NOT_FOUND`。
-
-### 方式二：从 git 安装
-
-```json
-{
-  "dependencies": {
-    "dsh-search-contrl": "github:你的用户名/dsh-search-contrl"
-  }
-}
-```
 
 ### 启用插件
 
