@@ -2,6 +2,9 @@
 
 一个 DSH 插件，为 [DSH (DeepSeek Harness)](https://github.com/) 注册「DSH-Search-Contrl」技能：检索并生成中文日报、指定日期范围的日报，或一周科技新闻总结。
 
+仓库：<https://github.com/ysyXH-0827/dsh-search-contrl> · 设置入口：DSH 设置 → 侧边栏「搜索控制」
+
+
 ## 2.0.0 改名：从 tech-daily-report 到 DSH-Search-Contrl
 
 技能与插件正式更名为 **DSH-Search-Contrl**（设置侧边栏名仍是「搜索控制」）。老名字的对应关系：
