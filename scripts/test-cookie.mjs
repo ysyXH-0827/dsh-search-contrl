@@ -17,7 +17,7 @@ import {
   readJar,
   saveSiteCookies,
 } from '../lib/cookie-jar.js';
-import { createCookieCapture, createDevToolsClient, findBrowser, pickPort } from '../lib/cookie-capture.js';
+import { createCookieCapture, createDevToolsClient, findBrowser, pickPort, removeProfileDir, stopBrowser } from '../lib/cookie-capture.js';
 import { createBilibiliClient, keyFromUrl, mixinKey, signWbi } from '../lib/bilibili-api.js';
 
 let passed = 0;
@@ -287,6 +287,63 @@ await test('a CDP method error is reported instead of looping until timeout', as
   assert.equal(result.code, 'cdp-error');
   assert.match(result.message, /wasn't found/);
   assert.equal(capture.status().state, 'error');
+});
+
+
+await test('removeProfileDir retries a locked directory instead of throwing', async () => {
+  let calls = 0;
+  const result = await removeProfileDir('C:/temp/profile', {
+    rm: () => {
+      calls += 1;
+      if (calls < 3) {
+        const error = new Error("EPERM, Permission denied: 'C:/temp/profile'");
+        error.code = 'EPERM';
+        throw error;
+      }
+    },
+    sleepImpl: async () => {},
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.attempts, 3);
+});
+
+await test('removeProfileDir never throws when the directory stays locked', async () => {
+  const result = await removeProfileDir('C:/temp/profile', {
+    attempts: 3,
+    rm: () => { const error = new Error('EPERM, Permission denied'); error.code = 'EPERM'; throw error; },
+    sleepImpl: async () => {},
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /EPERM/);
+});
+
+await test('stopBrowser waits on the exit event, not just kill()', async () => {
+  let killed = 0;
+  let resolved = false;
+  const handle = {
+    kill() { killed += 1; },
+    exited: new Promise(resolve => setTimeout(() => { resolved = true; resolve(0); }, 5)),
+  };
+  await stopBrowser(handle, { sleepImpl: ms => new Promise(resolve => setTimeout(resolve, Math.min(ms, 60))) });
+  assert.equal(killed, 1);
+  assert.equal(resolved, true, 'stopBrowser must await the real exit');
+});
+
+await test('a capture whose cleanup fails still reports success', async () => {
+  const dir = tempDir();
+  const fake = fakeBrowser({ cookies: [sessionCookie('SESSDATA')], loginAfter: 1 });
+  // Point the profile at a path that cannot be removed (a file, not a directory).
+  const locked = path.join(dir, 'locked-profile');
+  fs.writeFileSync(locked, 'not a directory', 'utf8');
+  const capture = createCookieCapture({
+    dataDir: dir, exists: () => true, launch: fake.launch, fetchImpl: fake.fetchImpl,
+    devToolsClient: fake.devToolsClient, now: () => now, sleepImpl: async () => {},
+    platform: 'win32', profileRoot: dir,
+  });
+  // fakeBrowser launches without creating anything; plant the locked path name.
+  const result = await capture.start('bilibili');
+  assert.equal(result.ok, true, 'cleanup trouble must not lose the captured cookies');
+  assert.equal(cookieHeader(dir, 'bilibili'), 'SESSDATA=v');
 });
 
 //#region bilibili

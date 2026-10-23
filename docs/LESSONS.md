@@ -176,3 +176,28 @@
 3. 加 `scripts/smoke-cdp.mjs`：真的开一个浏览器、真的种一个 SESSDATA、再让读取器找回来。单测只能证明逻辑，证明不了浏览器行为。
 
 规律：**凡是依赖外部程序协议的功能，必须有"真进程烟测"，且错误分类要区分"还没好"与"永远不会好"。**
+
+
+### 2.1.2 「EPERM, Permission denied」：杀进程≠目录已释放
+
+症状：点「获取 Cookie」、登录成功，界面却报
+`EPERM, Permission denied: \\?\C:\Users\...\Temp\dsh-search-contrl-bilibili-1792765757383`。
+
+根因不是权限配置，是时序：
+
+| 步骤 | 实际发生的事 |
+| --- | --- |
+| `handle.kill()` | 只杀了浏览器主进程 |
+| 紧接着 `fs.rmSync(profileDir)` | Edge 的 renderer / GPU / crashpad helper 还持有该目录 → EPERM |
+| `finally` 里抛出 | 覆盖了已经成功的读取结果，用户只看到裸错误 |
+
+修法（三条一起才完整）：
+
+1. **等真正退出再删**：`defaultLaunch` 返回 `exited` Promise（`exit`/`close` 事件 + 15s 兜底），`stopBrowser()` 先 kill 再 `Promise.race([exited, sleep(6s)])`。
+2. **Windows 要杀进程树**：`spawn('taskkill', ['/PID', pid, '/T', '/F'])`；只 `child.kill()` 会留下持有句柄的 helper。
+3. **清理失败不许影响结果**：`removeProfileDir()` 指数退避重试 8 次（250ms×attempt），永不抛，失败只写进 `state.cleanup`；下次捕获开头用 `sweepProfiles()` 清超过 30 分钟的残留。
+
+规律：**清理是 best-effort，捕获结果才是交付物。** 任何 teardown 都不得把成功结果改写成失败。
+
+烟测要覆盖清理：`scripts/smoke-cdp.mjs` 现在真开 Edge、真种 Cookie、读完后再走 `stopBrowser` + `removeProfileDir`，输出 `cleanup ok = true` 与 `CLEANUP OK`。
+
