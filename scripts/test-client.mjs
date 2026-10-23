@@ -77,27 +77,41 @@ assert.equal(typeof exports.apply, 'function', 'the client must export apply');
 assert.deepEqual(exports.inject, ['slots'], 'the client must declare the slots service');
 assert.equal(typeof exports.SettingsCard, 'function', 'the card component must be exported for smoke tests');
 
-let registered = null;
+const injected = [];
+const registrations = [];
 const ctx = {
   slots: {
     inject(name, callback) {
-      assert.equal(name, 'plugins.row.config');
-      callback();
+      injected.push(name);
+      return callback();
     },
     register(meta, render) {
-      registered = { meta, render };
+      registrations.push({ meta, render });
       return render;
     },
   },
 };
 exports.apply(ctx);
-assert.ok(registered, 'apply() must register the row config slot');
-assert.equal(registered.meta.name, 'plugins.row.config');
-assert.equal(registered.meta.key, 'dsh-tech-daily-report#tech-daily-report');
+assert.deepEqual(injected, ['settings.section', 'plugins.row.config'], 'apply() must inject both slots');
 
-const summary = registered.render({ view: 'summary' });
+const section = registrations.find(item => item.meta.name === 'settings.section');
+assert.ok(section, 'the first-level settings section「搜索控制」must be registered');
+assert.equal(section.meta.id, 'tech-daily-report-search-control');
+assert.equal(section.meta.label, '搜索控制');
+assert.equal(typeof section.meta.order, 'number', 'the section needs a numeric nav order');
+assert.ok(section.meta.order > 151, 'the section must sit after the bundled plugin sections (100–151)');
+
+const row = registrations.find(item => item.meta.name === 'plugins.row.config');
+assert.ok(row, 'apply() must keep registering the plugin row config page');
+assert.equal(row.meta.key, 'dsh-tech-daily-report#tech-daily-report');
+
+const summary = row.render({ view: 'summary' });
 assert.equal(typeof summary, 'string', 'the summary view must be plain text');
 assert.match(summary, /科技日报/);
+
+const sectionCard = section.render();
+assert.ok(sectionCard && typeof sectionCard === 'object', 'the settings section must render an element');
+assert.equal(sectionCard.type, exports.SettingsCard, 'the section renders the full settings card, not a summary');
 
 /** Expand function components and collect every string child. */
 function textOf(element, depth = 0) {
@@ -137,6 +151,7 @@ assert.equal(link.platform, 'B站');
 assert.equal(exports.describeLink('not a url'), null);
 assert.equal(exports.describeLink('https://example.com/x'), null);
 
+console.log('ok   settings.section「搜索控制」registers in the settings sidebar');
 console.log('ok   module loads and registers plugins.row.config under the patch row id');
 console.log('ok   the settings card renders its tabs, status and footer');
 console.log('ok   creator links map to a platform and domain');
