@@ -68,24 +68,39 @@ Agent 侧：`search_contrl` 的 `blogger` 动作识别到 `space.bilibili.com/<m
 ### 方式一：npm（推荐）
 
 ```bash
-# 在 DSH profile 目录执行
+# 在 DSH profile 目录执行：不带版本号 = 装 registry 上的 latest
 pnpm add dsh-search-contrl
+# 或
+npm install dsh-search-contrl
 ```
 
-包名 `dsh-search-contrl`，当前版本 **2.1.5**。没有 npm 账号或想锁定版本时，直接从 GitHub tag 装，效果一样：
+包名 `dsh-search-contrl`，直接装最新版即可，不需要记版本号：
+
+| 需求 | 命令 |
+| --- | --- |
+| 装最新版 | `pnpm add dsh-search-contrl` |
+| 升到最新版 | `pnpm add dsh-search-contrl@latest` |
+| 看有哪些版本 | `npm view dsh-search-contrl versions` |
+| 锁定某一版 | `pnpm add dsh-search-contrl@2.1.6` |
+
+发布走 GitHub Actions 的 OIDC trusted publishing，registry 上的 `latest` 永远指向最新一次成功发布——装完看一眼 `node_modules/dsh-search-contrl/package.json` 的 `version` 就知道拿到哪版。
+
+没有 npm 账号或想跳过 registry 时，直接从 GitHub tag 装，效果一样（tag 换成最新版本号即可）：
 
 ```bash
-pnpm add https://codeload.github.com/ysyXH-0827/dsh-search-contrl/tar.gz/refs/tags/v2.1.5
+pnpm add https://codeload.github.com/ysyXH-0827/dsh-search-contrl/tar.gz/refs/heads/main
 ```
 
 两种方式都必须同时在 profile 的 `package.json` 里登记到 bundles，否则插件不会被加载：
 
 ```json
 {
-  "dependencies": { "dsh-search-contrl": "^2.1.5" },
+  "dependencies": { "dsh-search-contrl": "latest" },
   "dsh": { "profile": { "bundles": ["...", "dsh-search-contrl"] } }
 }
 ```
+
+> 依赖写 `"latest"` 时，每次 `pnpm install` 都可能拉到更新的版本；想稳定复现就写死版本号（如 `"^2.1.6"`）。升级后必须重启 DSH 才会加载新的客户端 bundle。
 
 `cordis.patch.yml` 随包安装（`files` 白名单包含它），插件的 `id: search-contrl` 和设置页文案都来自这份 patch。打包内容可用 `pnpm pack` 自查：正常只有 `lib/`（12 个文件）、`cordis.patch.yml`、`README.md`、`LICENSE`、`package.json`，约 79 KB。
 
