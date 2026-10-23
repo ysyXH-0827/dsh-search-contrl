@@ -107,3 +107,17 @@
 | 12 | 未测 | 待验证 |
 
 - **待验证假设**：并发 12 是否仍无 429/失败；若成立可再省约 0.3–0.5 s。
+
+### 2026-10-23 设置页 GUI（1.5.0）
+
+- **结果**：新增渲染进程配置页，支持自定义搜索源、自定义主题（不限科技）、博主主页链接定向检索；所有写入都可回退。
+- **可回退的实现**：不是「保存前备份」，而是 **保存时先把被替换的旧版本写进 `history/<ISO>.json`，再写 `settings.json`**；重置与回退走同一条路径 —— 于是「回退」这个动作本身也会被快照，点错一次还能再退回来。
+- **不写 profile patch 的原因**：profile 的 `cordis.patch.yml` 是 Host 合成的配置层，插件运行期改写它等于让 Host 和插件同时改同一份文件，冲突无解；自带 `settings.json` + 历史目录才是可回退的边界。数据目录 `~/.dsh/plugin-data/<id>/`，可用 `TECH_DAILY_REPORT_DATA_DIR` 覆盖。
+- **规律**：**凡是要「可回退」的功能，回退动作本身必须被记录**；只备份写前状态的回退是一次性的。
+
+### 无浏览器怎么测渲染进程 bundle
+
+- **问题**：设置页代码在浏览器里跑，profile 的 `node_modules` 没有 `react`，无法直接 SSR 或浅渲染；真跑起来只能靠人肉点。
+- **做法**：`scripts/test-client.mjs` 用 stub 的 `react`（`useState`/`useCallback`/`useEffect`/`createElement`）+ stub 的 `react/jsx-runtime` 造一个假 `require`，把 `lib/client.js` 源码用 `new Function('window', source)` 塞进假 `window.__ModuleLoader__`，然后断言 **模块 id、`exports.apply`/`exports.inject`、slot 名与 key、summary 文案、卡片树里的各 tab 与按钮文案、平台解析映射**。
+- **取舍**：这不是渲染测试，不验证像素与交互；验证的是「注册契约 + 结构 + 文案」，正好是插件装上后最容易炸、也最不容易在浏览器里定位的部分。
+- **规律**：**渲染进程代码也要有可自动化的契约测试**，否则每次改动都得重启 Host 人肉点一遍，回归成本高到不会去做。

@@ -1,15 +1,18 @@
 {
   "name": "dsh-tech-daily-report",
-  "version": "1.4.4",
-  "description": "Chinese technology daily report skill for DSH, covering domestic and international AI, phones and vehicles with verifiable achievements.",
+  "version": "1.5.0",
+  "description": "Chinese technology daily report skill for DSH with a settings GUI: custom search sources, arbitrary topics beyond tech, creator-link scoped search, and one-click rollback of the settings.",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/search-tool.js && node --check lib/config.js && node --check lib/bing.js && node --check lib/tavily.js"
+    "check": "node --check lib/index.js && node --check lib/search-tool.js && node --check lib/config.js && node --check lib/bing.js && node --check lib/tavily.js && node --check lib/settings-store.js && node --check lib/settings-api.js && node --check lib/custom-search.js && node --check lib/client.js",
+    "test": "node scripts/test-settings.mjs && node scripts/test-client.mjs"
   },
   "exports": {
-    ".": "./lib/index.js"
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "lib",
@@ -25,7 +28,10 @@
     "technology",
     "news",
     "daily-report",
-    "tavily"
+    "tavily",
+    "settings-ui",
+    "custom-topics",
+    "creator-search"
   ],
   "license": "MIT",
   "peerDependencies": {
@@ -37,6 +43,13 @@
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ],
+      "platform": "web"
     }
   }
 }
