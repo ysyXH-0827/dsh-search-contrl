@@ -120,10 +120,38 @@ test('restore rejects path traversal and unknown ids', () => {
 
 test('history is capped by the limit option', () => {
   const dir = tempDir();
+  // Pin the clock. Seven back-to-back saves can otherwise share a millisecond,
+  // which used to collapse two snapshots into one and make this assertion flaky.
   for (let i = 0; i < 7; i += 1) {
-    saveSettings(dir, { topics: [{ label: `t${i}`, keywords: ['k'] }] }, { limit: 3 });
+    saveSettings(dir, { topics: [{ label: `t${i}`, keywords: ['k'] }] }, { limit: 3, now: new Date(Date.UTC(2026, 0, 1, 0, 0, 0, i)) });
   }
   assert.equal(listHistory(dir).length, 3, 'the oldest snapshots beyond the limit are deleted');
+});
+
+test('two saves in the same millisecond keep separate snapshots', () => {
+  const dir = tempDir();
+  const now = new Date('2026-10-23T12:00:00.000Z');
+  saveSettings(dir, { topics: [{ label: 'v1', keywords: ['one'] }] }, { now });
+  saveSettings(dir, { topics: [{ label: 'v2', keywords: ['two'] }] }, { now });
+  saveSettings(dir, { topics: [{ label: 'v3', keywords: ['three'] }] }, { now });
+  const history = listHistory(dir);
+  // Three saves leave two snapshots: the very first write has nothing to replace.
+  assert.equal(history.length, 2, 'a collision must not overwrite a rollback point');
+  assert.equal(new Set(history.map((entry) => entry.id)).size, 2, 'the ids stay distinct');
+  assert.deepEqual(
+    history.map((entry) => entry.counts.topics),
+    [1, 1],
+    'each snapshot still holds the document it replaced'
+  );
+});
+
+test('same-millisecond snapshots list the newest first', () => {
+  const dir = tempDir();
+  const now = new Date('2026-10-23T12:00:00.000Z');
+  saveSettings(dir, { topics: [{ label: 'a', keywords: ['k'] }] }, { now });
+  saveSettings(dir, { topics: [{ label: 'b', keywords: ['k'] }] }, { now, reason: 'second' });
+  const [newest] = listHistory(dir);
+  assert.equal(newest.reason, 'second', 'the later write is the one the UI offers first');
 });
 
 test('counts summarise the document', () => {
