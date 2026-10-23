@@ -154,3 +154,25 @@
 ### 判断"登录成功"要看必需 Cookie 名，不要看页面状态
 
 最初想等窗口 URL 跳到首页就算登录完成——不可靠：很多站点登录后停在中间页，或者跳转前就要二次验证。改成读 CDP 拿到的 Cookie 列表、检查该站点的必需名（B站 `SESSDATA`、知乎 `z_c0`…）全部存在才算成功。这样"页面打开了但没登录"不会被误判成已登录，也不会把半截会话写进 jar。
+
+### 2.1.1 「登录了却没抓到 Cookie」：CDP 方法选错，且错误被当成"还没启动"
+
+现象：用户在登录窗口里完成登录，设置页一直显示"等待登录…"，5 分钟后超时，什么都没保存。
+
+实测（Edge 141，`--remote-debugging-port` 打开的临时 profile）：
+
+| 调用 | 结果 |
+| --- | --- |
+| `/json/version` 返回的 **browser** target 上 `Network.getAllCookies` | 报错 `-32601 "'Network.getAllCookies' wasn't found"` |
+| **browser** target 上 `Storage.getCookies` | 正常返回全部 Cookie |
+| attach 到 page target 后用 sessionId 发 `Network.getAllCookies` | 同样正常 |
+
+根因有两层：① 选的方法在 browser target 上根本不存在；② 轮询循环把所有异常都当成"调试端口还没起来"，真实错误被吞掉，用户只看到一直等待。
+
+修法：
+
+1. 先试 browser target 的 `Storage.getCookies`，失败再 attach page target 用 `Network.getAllCookies` 带 sessionId。
+2. 只把"连不上 / 没 socket url"归为可重试（错误带 `code:'not-ready'`）；方法或权限错误立即返回 `code:'cdp-error'`，并把消息显示到设置页。
+3. 加 `scripts/smoke-cdp.mjs`：真的开一个浏览器、真的种一个 SESSDATA、再让读取器找回来。单测只能证明逻辑，证明不了浏览器行为。
+
+规律：**凡是依赖外部程序协议的功能，必须有"真进程烟测"，且错误分类要区分"还没好"与"永远不会好"。**
