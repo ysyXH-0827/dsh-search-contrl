@@ -397,6 +397,46 @@ await test('aiConclusion reports the missing login instead of throwing', async (
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'not-logged-in');
 });
+await test('latestVideos prefers the WBI-signed endpoint', async () => {
+  const seen = [];
+  const client = createBilibiliClient({
+    cookie: 'SESSDATA=x',
+    fetchImpl: async url => {
+      seen.push(url);
+      if (url.includes('/x/web-interface/nav')) {
+        return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
+      }
+      return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV1', title: 't', created: 1, length: '01:00', play: 1, comment: 0, description: '' }] } } }) };
+    },
+  });
+  const videos = await client.latestVideos('25876945', { ps: 1 });
+  assert.equal(videos.length, 1);
+  assert.ok(seen.some(url => url.includes('/x/space/wbi/arc/search?')), 'the signed endpoint must be tried');
+  assert.ok(seen.some(url => url.includes('w_rid=')), 'the signed request must carry w_rid');
+  assert.equal(seen.some(url => url.includes('/x/space/arc/search?mid=')), false, 'unsigned endpoint is only a fallback');
+});
+
+await test('latestVideos falls back to the unsigned endpoint after a rate limit', async () => {
+  const seen = [];
+  const client = createBilibiliClient({
+    cookie: 'SESSDATA=x',
+    sleepImpl: async () => {},
+    fetchImpl: async url => {
+      seen.push(url);
+      if (url.includes('/x/web-interface/nav')) {
+        return { ok: true, json: async () => ({ code: -101, data: { isLogin: false, wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/aaaa.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/bbbb.png' } } }) };
+      }
+      if (url.includes('/wbi/')) {
+        return { ok: true, json: async () => ({ code: -799, message: '请求过于频繁' }) };
+      }
+      return { ok: true, json: async () => ({ code: 0, data: { list: { vlist: [{ bvid: 'BV2', title: 'fallback', created: 1, length: '01:00', play: 2, comment: 0, description: '' }] } } }) };
+    },
+  });
+  const videos = await client.latestVideos('25876945', { ps: 1 });
+  assert.equal(videos[0].bvid, 'BV2');
+  assert.ok(seen.some(url => url.includes('/x/space/arc/search?mid=')), 'the unsigned fallback must run');
+});
+
 //#endregion
 
 //#region routes
@@ -435,6 +475,12 @@ await test('cookie routes start a session, report status and clear it', async ()
   assert.equal(cookieHeader(dir, 'bilibili'), '');
 });
 //#endregion
+
+await test('the blogger fast path is not duplicated into the topic branch', () => {
+  const source = fs.readFileSync(new URL('../lib/search-tool.js', import.meta.url), 'utf8');
+  assert.equal((source.match(/createBilibiliClient\(\{ cookie: cookieHeader \}\)/g) ?? []).length, 1);
+  assert.equal((source.match(/steps\.push/g) ?? []).length, 0, 'no dangling patch-time variable may survive');
+});
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {

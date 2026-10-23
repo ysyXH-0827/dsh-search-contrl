@@ -201,3 +201,19 @@
 
 烟测要覆盖清理：`scripts/smoke-cdp.mjs` 现在真开 Edge、真种 Cookie、读完后再走 `stopBrowser` + `removeProfileDir`，输出 `cleanup ok = true` 与 `CLEANUP OK`。
 
+
+### 2.1.3 「博主最新视频」拿不到：签名接口才是可靠路径
+
+症状：登录 Cookie 已存好，`action:'blogger'` 却退回搜索引擎结果，拿不到真正的最新视频。
+
+两个独立故障叠在一起：
+
+| 故障 | 证据 | 修法 |
+| --- | --- | --- |
+| 未签名的 `x/space/arc/search` 被风控 | `{"code":-799,"message":"请求过于频繁"}`（已登录也一样） | 改走 **WBI 签名** 的 `x/space/wbi/arc/search`，并带上 `dm_img_list`/`dm_img_str`/`dm_cover_img_str` 指纹占位参数；未签名版只作兜底，中间退避 1.2s |
+| 补丁插错分支 | 快速路径文本同时匹配到 topic 与 blogger 两处锚点，topic 分支里多出一份引用 `steps`/`blogger` 的死代码 → `steps is not defined` | 补丁只替换首处 / 用唯一锚点；加静态回归测试断言 `createBilibiliClient({ cookie: cookieHeader })` 只出现 1 次、`steps.push` 为 0 |
+
+登录态带来的额外收获：`view/conclusion/get`（同样要 WBI 签名）能拿到平台 AI 总结——这只在登录 Cookie 下可用，匿名访问返回 `-101`。
+
+规律：**外部 API 的"公开"端点不等于"可用"端点**；风控靠签名而不只是 Cookie，所以签名逻辑要跟登录态一起做。
+
