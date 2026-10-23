@@ -23,7 +23,7 @@ import {
   restoreSettings,
   saveSettings,
 } from '../lib/settings-store.js';
-import { buildBloggerQueries, buildTopicQueries, parseBloggerUrl, sourceChannel } from '../lib/custom-search.js';
+import { buildBloggerQueries, buildTopicQueries, demoteSiteOperator, filterResultsByDomain, parseBloggerUrl, preferDeepLinks, sourceChannel } from '../lib/custom-search.js';
 import { buildSettingsRoutes, isBridgeRequestAllowed } from '../lib/settings-api.js';
 
 let passed = 0;
@@ -146,7 +146,7 @@ test('creator links parse into a platform and a site scoped query', () => {
   assert.equal(bilibili.domain, 'bilibili.com');
   const x = buildBloggerQueries({ label: 'Some Dev', url: 'https://x.com/somedev' });
   assert.equal(x.ok, true);
-  assert.deepEqual(x.queries.map(item => item.query), ['site:x.com somedev', 'site:x.com Some Dev']);
+  assert.deepEqual(x.queries.map(item => item.query), ['site:x.com Some Dev', 'site:x.com somedev']);
   const wechat = buildBloggerQueries({ label: '某个公众号', url: 'https://mp.weixin.qq.com/s/abcdef' });
   assert.deepEqual(wechat.queries.map(item => item.query), ['site:mp.weixin.qq.com 某个公众号']);
 });
@@ -246,6 +246,50 @@ await test('the bridge routes save, describe and roll back', async () => {
   const wrongMethod = fakeResponse();
   await save.handler(fakeRequest({}, { method: 'GET' }), wrongMethod);
   assert.equal(wrongMethod.statusCode, 405);
+});
+
+
+await test('heredoc topic keeps its domains so callers can filter results', async () => {
+  const built = buildTopicQueries({ keywords: ['solid state battery'], domains: ['reuters.com'] });
+  assert.deepEqual(built.domains, ['reuters.com']);
+});
+
+await test('site: is demoted to a plain keyword for channels that ignore it', async () => {
+  assert.equal(demoteSiteOperator('site:bilibili.com 影视飓风'), 'bilibili.com 影视飓风');
+  assert.equal(demoteSiteOperator('plain query'), 'plain query');
+});
+
+await test('domain filter keeps the domain and its subdomains only', async () => {
+  const kept = filterResultsByDomain(
+    [
+      { url: 'https://reuters.com/a' },
+      { url: 'https://www.reuters.com/b' },
+      { url: 'https://m.ithome.com/c' },
+      { url: 'not a url' },
+      {},
+    ],
+    ['reuters.com']
+  );
+  assert.equal(kept.length, 2);
+  assert.equal(filterResultsByDomain([{ url: 'https://x.com/1' }], []).length, 1, 'no domains means no filtering');
+});
+
+
+await test('a creator name is queried before its numeric handle', async () => {
+  const built = buildBloggerQueries({ url: 'https://space.bilibili.com/946974', label: '影视飓风' });
+  assert.equal(built.queries[0].label, 'name');
+  assert.ok(built.queries[0].query.includes('影视飓风'));
+});
+
+await test('bare homepages give way to real content pages', async () => {
+  const kept = preferDeepLinks([
+    { url: 'https://www.bilibili.com/' },
+    { url: 'https://space.bilibili.com/946974' },
+  ]);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].url, 'https://space.bilibili.com/946974');
+  const onlyHome = preferDeepLinks([{ url: 'https://www.bilibili.com/' }]);
+  assert.equal(onlyHome.length, 1, 'a homepage-only answer is still returned');
 });
 
 const failed = failures.length;

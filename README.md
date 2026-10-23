@@ -165,6 +165,8 @@ pnpm install
 
 支持解析的链接：B 站、微博、知乎、X / Twitter、YouTube、抖音、快手、小红书、GitHub、Medium、Substack、CSDN、掘金、少数派、公众号（`mp.weixin.qq.com`）。解析不了的主页链接在保存时会被拒绝，不会静默写入。
 
+**定向语义是本地保证的，不是靠 `site:`**：实测免费的 Bing RSS 通道对 `site:` 很不老实——`site:reuters.com AI chips` 返回过 CSDN、知乎的结果。所以域内结果的判定在本地做：只保留主机名等于目标域名或在其子域下的结果，并把只剩首页（如 `https://www.bilibili.com/`）的条目让位给真正的内容页。若换成「域名当普通关键词」后仍然一条都对不上，才会花 1 credit 走 Tavily 的 `include_domains`，返回里标 `domain_fallback: "tavily"`；没配 Tavily Key 时就是空结果加 `dropped_by_domain` 计数，**不会把站外噪声当定向结果交出去**。博主检索先查名称再查 UID——数字 UID 基本不被索引，名称通常能直接落到主页或作品页。
+
 **版本可回退**：每次保存、重置、回退都会先把**被替换的那一版**写进历史，再写新版本；所以回退本身也能再回退，不存在「点错一次就回不去」。默认保留 20 个版本，用 `historyLimit` 调整。
 
 **数据落在哪**：`~/.dsh/plugin-data/dsh-tech-daily-report/settings.json`，历史在同目录 `history/`。不写 profile 的 patch 文件——GUI 不该改写 Host 合成出来的配置层；自带存储才能保证每次写入都可回退。可用 `TECH_DAILY_REPORT_DATA_DIR` 改目录。
