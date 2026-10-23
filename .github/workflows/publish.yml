@@ -47,13 +47,7 @@ jobs:
 
       - name: Publish
         if: ${{ !inputs.dry_run }}
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          if npm view "dsh-search-contrl@$version" version >/dev/null 2>&1; then
-            echo "dsh-search-contrl@$version is already on the registry; nothing to publish (tag replay is a no-op)"
-            exit 0
-          fi
-          npm publish --access public
+        run: npm publish --access public
 
       - name: Dry run
         if: ${{ inputs.dry_run }}
