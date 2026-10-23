@@ -259,3 +259,15 @@ CI 的 runner 比本机快，撞毫秒的概率高得多，于是同一条断言
 效果：冷启动 803 ms（4 个必要请求），同一问答第二次 1 ms。
 
 规律：**缓存的位置必须和“调用粒度”对齐**——工具每次调用都新建对象时，实例内缓存等于装饰。
+
+### tag 触发的 workflow 用的是 tag 所在提交的文件版本
+
+补打 `v2.1.6` / `v2.1.7` 两个历史 tag 后，Actions 立刻各起了一个 publish run，两次都 `npm error You cannot publish over the previously published versions` 失败。
+
+原因不是隐藏的发布逻辑，而是 GitHub Actions 的取值规则：**`push: tags` 触发时，`uses:`/`run:` 用的 workflow 文件来自被推的那个 tag 指向的提交**，不是默认分支的最新版。这两个 tag 指向的提交里 `publish.yml` 还没有「版本已存在就跳过」的守卫，所以重放必然重发、必然 403。
+
+三条可用结论：
+
+1. workflow 的修复只对**之后的 tag**生效；给历史提交补 tag 不会继承新守卫。
+2. 需要一个 tag 重跑安全时，tag 必须指到包含守卫的那个提交之后。
+3. 补打历史 tag 前先想清楚：它会不会触发一次注定失败的发布 run。要保留 tag 又不想跑 CI，就把标签当作纯书签，发布只走 `workflow_dispatch`。
