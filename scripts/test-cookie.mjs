@@ -530,9 +530,12 @@ await test('cookie routes start a session, report status and clear it', async ()
 });
 //#endregion
 
-await test('the blogger fast path is not duplicated into the topic branch', () => {
+await test('both creator actions read Bilibili through one function', () => {
   const source = fs.readFileSync(new URL('../lib/search-tool.js', import.meta.url), 'utf8');
-  assert.equal((source.match(/createBilibiliClient\(\{ cookie: cookieHeader \}\)/g) ?? []).length, 1);
+  // The single-creator action and the batch action must not carry their own
+  // copies of the API flow: only readBilibiliCreator may build a client.
+  assert.equal((source.match(/createBilibiliClient\(/g) ?? []).length, 1, 'one client factory call, inside readBilibiliCreator');
+  assert.equal((source.match(/await readBilibiliCreator\(/g) ?? []).length, 2, 'blogger and bloggers both delegate');
   assert.equal((source.match(/steps\.push/g) ?? []).length, 0, 'no dangling patch-time variable may survive');
 });
 

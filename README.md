@@ -406,6 +406,14 @@ pnpm install
 └── README.md
 ```
 
+
+### 代码整洁约定
+
+- **新增 `export` 前先证明有外部使用者**：只有本文件或测试用到的符号不导出。当前 `lib/` 共 50 个导出，其中 12 个是给 `scripts/test-*.mjs` 的测试缝。
+- **一个流程只留一个实现**：单博主与多博主的 B站读取都走 `readBilibiliCreator`，不要再各写一份。
+- **清理前先取证**：用脚本统计“本文件引用 vs 其它文件 import”，不要凭记忆删；删完跑 `npm test`（settings/client/cookie/bloggers 四组）。
+- **已弃用的发布脚本**：`publish.ps1` 已删除，发布统一走 `.github/workflows/publish.yml`（tag 触发，OIDC + provenance）。
+
 ## 许可证
 
 [MIT](./LICENSE)
