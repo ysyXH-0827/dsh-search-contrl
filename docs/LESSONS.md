@@ -309,3 +309,24 @@ CI 的 runner 比本机快，撞毫秒的概率高得多，于是同一条断言
 第一轮清理把 `lib/bing.js` 的 `buildBingQuery`/`buildBingUrl`/`parseBingRss` 判成“仅内部使用”并去掉导出，结果 `verify` 工作流第 6 步 `Test the keyless Bing adapter offline` 直接失败——它用 `node --input-type=module -e` 内联 import 了这三个函数。
 
 原因：审计脚本只扫了 `lib/` 与 `scripts/` 的 import，没扫 `.github/workflows/*.yml` 里的内联代码。**规律**：判断“有没有人在用”时，使用者可能住在一段 YAML 字符串里；grep 的范围要和“会被执行的代码”范围一致，而不是和“看起来像源码的文件”一致。
+
+### 2.1.13 「链接全是 403」：HEAD + 旧 UA 造成的假阴性
+
+周报 68 个外链首轮校验结果 `ok 67 / failed 1`，失败的 `https://www.ifanr.com/1685507` 报 **403**。人工复测立刻翻案：
+
+| 请求方式 | 状态 | 大小 |
+| --- | --- | --- |
+| `HEAD` + Chrome/120 UA | 403 | 0 |
+| `GET` + Chrome/141 UA | 200 | 73,129 |
+| `GET` + `m.ifanr.com` 域名 | 000 | 0 |
+
+两个独立的假阴性来源叠在一起：**只发 HEAD**（部分站点按方法拦截）与**UA 版本过旧**（站点按版本号拦）。任一条都足以把一条好链接判死，而报告里的“来源已核实”会因此被误删。
+
+修法（`scripts/verify-links.mjs`）：
+1. `--file` 同时接受文件与目录——此前传文件路径直接 `ENOTDIR` 崩掉，等于这条路径没人用过。
+2. HEAD 非 200 时用 **GET + 第二个 UA** 复测，GET 拿到 200/206 就按可达计；只舍弃两条通道都失败的结果。
+3. UA 提到 Chrome/141 + Safari 19 双档，`Accept` 头补全。
+
+复测：`checked 68 / ok 68 / failed 0`，并发 6，2.02 s。
+
+**规律**：链接校验的下限不是“我请求过了”，而是“我至少用两种方式请求过了”。单方法的 403 只能证明服务器不喜欢这次请求，不能证明页面不存在。

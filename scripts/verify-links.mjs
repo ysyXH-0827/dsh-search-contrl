@@ -36,14 +36,21 @@ function parseArgs(argv) {
   return out;
 }
 
-async function collectFromDir(dir, acc) {
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) await collectFromDir(full, acc);
-    else if (entry.name.endsWith('.md')) {
-      const text = await readFile(full, 'utf8');
-      for (const m of text.matchAll(/\((https?:\/\/[^)]+)\)/g)) acc.add(m[1]);
-    }
+async function collectFromMarkdown(file, acc) {
+  const text = await readFile(file, 'utf8');
+  for (const m of text.matchAll(/\((https?:\/\/[^)]+)\)/g)) acc.add(m[1]);
+  for (const m of text.matchAll(/<(https?:\/\/[^>\s]+)>/g)) acc.add(m[1]);
+}
+
+// --file 既接受单个 .md，也接受目录（递归收集）。此前只当目录处理，
+// 传入文件路径会 ENOTDIR 直接失败。
+async function collectFromPath(target, acc) {
+  const info = await stat(target);
+  if (info.isFile()) return collectFromMarkdown(target, acc);
+  for (const entry of await readdir(target, { withFileTypes: true })) {
+    const full = join(target, entry.name);
+    if (entry.isDirectory()) await collectFromPath(full, acc);
+    else if (entry.name.endsWith('.md')) await collectFromMarkdown(full, acc);
   }
 }
 
@@ -62,22 +69,41 @@ async function cachedVerdict(url, hours, refresh) {
   }
 }
 
-async function checkOnce(url) {
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Safari/605.1.15',
+];
+
+async function requestStatus(url, method, agent) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('timeout')), 15000);
   try {
     const res = await fetch(url, {
-      method: 'HEAD',
+      method,
       redirect: 'follow',
       signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      headers: { 'User-Agent': agent, Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
     });
+    if (method === 'GET' && res.body) await res.body.cancel();
     return res.status;
   } catch {
     return 0;
   } finally {
     clearTimeout(timer);
   }
+}
+
+// HEAD 被 403/405 挡掉是常见的假阴性（爱范儿等站点按 UA 版本与 HEAD 方法拦截）。
+// 所以：HEAD 非 200 时用 GET + 第二个 UA 复测，GET 成功就按成功计。
+async function checkOnce(url) {
+  const head = await requestStatus(url, 'HEAD', USER_AGENTS[0]);
+  if (head === 200 || head === 206) return head;
+  if ([0, 400, 403, 405, 406].includes(head)) {
+    const get = await requestStatus(url, 'GET', USER_AGENTS[1]);
+    if (get === 200 || get === 206) return get;
+    if (get !== 0) return get;
+  }
+  return head;
 }
 
 async function checkWithRetry(url, retries) {
@@ -94,7 +120,7 @@ async function checkWithRetry(url, retries) {
 async function run() {
   const args = parseArgs(process.argv.slice(2));
   const urls = new Set(args.urls);
-  if (args.file) await collectFromDir(args.file, urls);
+  if (args.file) await collectFromPath(args.file, urls);
   const list = [...urls];
   if (list.length === 0) {
     console.error('usage: node scripts/verify-links.mjs (--file <path> | --urls <url...>) [--concurrency 6] [--cache-hours 24] [--refresh]');
