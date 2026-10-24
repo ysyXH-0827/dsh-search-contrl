@@ -27,6 +27,18 @@
 Agent 侧：`search_contrl` 的 `blogger` 动作识别到 `space.bilibili.com/<mid>` 会**直接调 B站空间 API**（有 Cookie 时还能读平台 AI 总结），拿到真正的“最新视频”而不是搜索收录页；`action:'cookie'` 可列出/清除已存会话。
 
 
+### 报告输出方式怎么工作
+
+`delivery.mode` 有三个取值，默认 `file`：
+
+| 模式 | 行为 | 适用 |
+|---|---|---|
+| `file` | 写入 `reports/`，回复给路径与要点表 | 归档、发邮件、二次编辑 |
+| `chat` | 不写文件，整份正文发在对话里 | 手机上直接看，不想翻文件 |
+| `both` | 写文件 + 正文进对话 | 既要档案又要当场可读 |
+
+聊天模式的条目压成一行：`**标题**（日期/状态）— 核心事实；关键数据；来源链接`，板块标题保留、条数不少于文件版——不允许只回一句“已生成”。切换后下一份报告立即生效，不用重启。
+
 ## 2.0.0 改名：从 tech-daily-report 到 DSH-Search-Contrl
 
 技能与插件正式更名为 **DSH-Search-Contrl**（设置侧边栏名仍是「搜索控制」）。老名字的对应关系：
@@ -41,7 +53,13 @@ Agent 侧：`search_contrl` 的 `blogger` 动作识别到 `space.bilibili.com/<m
 | 桥前缀 | `/api/tech-daily-report-settings` | `/api/search-contrl-settings` |
 | 数据目录 | `~/.dsh/plugin-data/dsh-tech-daily-report` | `~/.dsh/plugin-data/dsh-search-contrl` |
 
-升级要做的三件事：① profile `package.json` 的依赖键与 `dsh.profile.bundles` 改成 `dsh-search-contrl`；② `cordis.patch.yml` 的行 id 改成 `search-contrl`、name 改成 `dsh-search-contrl`；③ 重启 DSH。旧数据目录不会被自动迁移，需要保留配置就手工把 `settings.json` 与 `history/` 复制到新目录。
+升级要做的四件事：
+
+| 能力 | 怎么填 | 落到检索/交付上的样子 |
+|---|---|---|
+| 报告输出方式 | 顶部三选一：只给文件 / 只在聊天中呈现 / 文件 + 聊天 | 存进 `settings.json` 的 `delivery.mode`；`chat` 不写文件、正文直接进对话，`both` 两者都做 |
+
+原有三件事：① profile `package.json` 的依赖键与 `dsh.profile.bundles` 改成 `dsh-search-contrl`；② `cordis.patch.yml` 的行 id 改成 `search-contrl`、name 改成 `dsh-search-contrl`；③ 重启 DSH。旧数据目录不会被自动迁移，需要保留配置就手工把 `settings.json` 与 `history/` 复制到新目录。
 
 输出覆盖六个固定板块，每个板块都要播报可核验的成就与关键指标：
 
@@ -253,10 +271,16 @@ pnpm install
 
 | 入口 | 位置 | 形态 |
 |---|---|---|
-| **搜索控制**（主入口） | **设置 → 侧边栏「搜索控制」** | 一级分区，点进去直接是四个页签（`settings.section` slot，order 152） |
+| **搜索控制**（主入口） | **设置 → 侧边栏「搜索控制」** | 一级分区，点进去直接是四个页签 + 顶部「报告输出方式」（`settings.section` slot，order 152） |
 | 插件行配置 | 设置 → 插件 → DSH-Search-Contrl | 同一张卡片的折叠/展开形态（`plugins.row.config` slot） |
 
-三件事：
+四件事：
+
+| 能力 | 怎么填 | 落到检索/交付上的样子 |
+|---|---|---|
+| 报告输出方式 | 顶部三选一：只给文件 / 只在聊天中呈现 / 文件 + 聊天 | 存进 `settings.json` 的 `delivery.mode`；`chat` 不写文件、正文直接进对话，`both` 两者都做 |
+
+原有三件事：
 
 | 能力 | 怎么填 | 落到检索上的样子 |
 |---|---|---|

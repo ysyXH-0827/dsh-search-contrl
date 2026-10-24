@@ -320,6 +320,45 @@ await test('bare homepages give way to real content pages', async () => {
   assert.equal(onlyHome.length, 1, 'a homepage-only answer is still returned');
 });
 
+await test('snapshot names keep the full timestamp, not just the year and month', async () => {
+  const dir = tempDir();
+  const sameMoment = new Date('2026-10-24T09:00:00.000Z');
+  // The first save has nothing to replace, so it leaves no snapshot: seed one.
+  saveSettings(dir, { topics: [{ label: 'seed', keywords: ['seed'] }] }, { now: new Date('2026-10-23T09:00:00.000Z') });
+  saveSettings(dir, { topics: [{ label: 'a', keywords: ['a'] }] }, { now: sameMoment });
+  saveSettings(dir, { topics: [{ label: 'b', keywords: ['b'] }] }, { now: sameMoment });
+  saveSettings(dir, { topics: [{ label: 'c', keywords: ['c'] }] }, { now: new Date('2026-10-25T09:00:00.000Z') });
+  const ids = listHistory(dir).map(entry => entry.id);
+  assert.equal(ids.length, 3, 'three saves must leave three rollback points');
+  assert.equal(new Set(ids).size, 3, 'a same-millisecond save must not overwrite its predecessor');
+  for (const id of ids) {
+    assert.match(id, /^\d{4}-\d{2}-\d{2}T/, `a snapshot id must start with the full date, got ${id}`);
+  }
+  assert.match(ids[0], /^2026-10-25T/, 'the newest snapshot is listed first');
+});
+
+await test('delivery mode defaults to a file and accepts the three modes', async () => {
+  assert.equal(emptySettings().delivery.mode, 'file', 'a fresh store delivers by file');
+  assert.equal(normalizeSettings({}).delivery.mode, 'file', 'a missing field falls back to file');
+  assert.equal(normalizeSettings({ delivery: { mode: 'chat' } }).delivery.mode, 'chat');
+  assert.equal(normalizeSettings({ delivery: { mode: 'both' } }).delivery.mode, 'both');
+  assert.equal(normalizeSettings({ delivery: 'chat' }).delivery.mode, 'chat', 'a bare string is accepted');
+  assert.equal(normalizeSettings({ delivery: { mode: 'email' } }).delivery.mode, 'file', 'an unknown mode cannot leak through');
+  assert.deepEqual(normalizeSettings({ delivery: { mode: 'chat', extra: 1 } }).delivery, { mode: 'chat' }, 'unknown sub-fields are dropped');
+});
+
+await test('a saved delivery mode survives a write and a rollback', async () => {
+  const dir = tempDir();
+  const first = saveSettings(dir, { delivery: { mode: 'chat' }, bloggers: [{ label: '极客湾', url: 'https://space.bilibili.com/25876945' }] });
+  assert.equal(first.value.delivery.mode, 'chat');
+  assert.equal(readSettings(dir).value.delivery.mode, 'chat');
+  saveSettings(dir, { delivery: { mode: 'both' } });
+  const [snapshot] = listHistory(dir);
+  const restored = restoreSettings(dir, snapshot.id);
+  assert.equal(restored.ok, true);
+  assert.equal(restored.value.delivery.mode, 'chat', 'rolling back restores the earlier delivery mode too');
+});
+
 const failed = failures.length;
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exitCode = 1;

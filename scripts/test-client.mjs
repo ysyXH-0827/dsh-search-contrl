@@ -140,6 +140,10 @@ for (const expected of [
   '博主',
   '历史版本',
   '登录 Cookie',
+  '报告输出方式',
+  '只给文件',
+  '只在聊天中呈现',
+  '文件 + 聊天',
   '已保存',
   '清空自定义项',
 ]) {
@@ -157,5 +161,6 @@ assert.equal(exports.describeLink('https://example.com/x'), null);
 console.log('ok   settings.section「搜索控制」registers in the settings sidebar');
 console.log('ok   module loads and registers plugins.row.config under the patch row id');
 console.log('ok   the settings card renders its tabs, status and footer');
+console.log('ok   the card offers the three report delivery modes');
 console.log('ok   creator links map to a platform and domain');
 console.log('\nall client checks passed');
