@@ -331,10 +331,12 @@ if (args.audit) {
 }
 
 // ── --digest：给模型读的紧凑清单（每行：日期｜标题｜链接），比整份 JSON 省约 80% token ──
-// 每板块默认只留 3 行（--digest-max=N 可调）：日报一天每板块顶多 2–3 条，留多了纯占上下文。
+// 每板块行数：单日默认 3 行、多日窗口默认 6 行（--digest-max=N 可调）：日报一天每板块顶多 2–3 条，周报要铺开。
 if (args.digest) {
   const cut = s => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
-  const cap = Math.max(1, Number(args['digest-max'] ?? 3));
+  // 单日默认 3 行；多日窗口（周报/月报）默认 6 行，否则模型看不全 30+ 条候选。
+  const capDefault = Number(args.days ?? 1) > 1 ? 6 : 3;
+  const cap = Math.max(1, Number(args['digest-max'] ?? capDefault));
   const lines = [];
   lines.push(`# 候选 ${windowed.length} 条 / ${okFeeds.length} 源 / ${payload.stats.elapsedMs}ms / 窗口 ${from.toISOString().slice(0,10)}~${to.toISOString().slice(0,10)} / 事件程度 ${scale}（每板块最多 ${cap} 行）`);
   for (const [board, items] of Object.entries(boards)) {
