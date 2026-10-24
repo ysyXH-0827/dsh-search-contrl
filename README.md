@@ -485,6 +485,19 @@ node scripts/archive-merge.mjs --days=7 --out=week.json  # 输出合并后的 JS
 
 - 归档文件按**采集目标日**命名（`--date` 决定），补跑历史窗口也会落到正确日期；同一日重复跑只覆盖、不累加。
 - `archive-merge` 会去重（URL + 标题归一化），并列出缺档日期：**缺档就在报告里写明，不要用相邻日期顶替**。
+
+### 不依赖本机：GitHub Actions 归档（2.2.12 起）
+
+本机常关机时，用独立仓库 **`ysyXH-0827/dsh-news-archive`** 每天 23:05（北京时间）在 GitHub 上跑同一条采集命令，把快照提交到 `archive/<日期>.json`：
+
+```bash
+node scripts/archive-pull.mjs --days=7    # 拉远端快照到本地（走 GitHub API，本机无需翻墙）
+node scripts/archive-pull.mjs --days=7 --force   # 覆盖本地已有快照
+node scripts/archive-merge.mjs --days=7 --digest  # 拼多日窗口
+```
+
+- 有 `GH_TOKEN` / `GITHUB_TOKEN` 环境变量时走 GitHub API；没有就退回 `raw.githubusercontent.com`。
+- 远端快照是同一条 `daily-collect.mjs --archive` 产出的，格式与本机一致，两者可混用。
 - 自动化（零 token）：Windows 计划任务每天 23:50 执行 `scripts/daily-archive.cmd`；macOS/Linux 用 cron：
   ```cron
   50 23 * * * cd /path/to/dsh && node scripts/daily-collect.mjs --archive --max=60 --others-max=120
