@@ -53,7 +53,7 @@ Agent 侧：`search_contrl` 的 `blogger` 动作识别到 `space.bilibili.com/<m
 | 桥前缀 | `/api/tech-daily-report-settings` | `/api/search-contrl-settings` |
 | 数据目录 | `~/.dsh/plugin-data/dsh-tech-daily-report` | `~/.dsh/plugin-data/dsh-search-contrl` |
 
-升级要做的四件事：
+升级要做的六件事：
 
 | 能力 | 怎么填 | 落到检索/交付上的样子 |
 |---|---|---|
@@ -281,11 +281,17 @@ pnpm install
 | **搜索控制**（主入口） | **设置 → 侧边栏「搜索控制」** | 一级分区，点进去直接是四个页签 + 顶部「报告输出方式」（`settings.section` slot，order 152） |
 | 插件行配置 | 设置 → 插件 → DSH-Search-Contrl | 同一张卡片的折叠/展开形态（`plugins.row.config` slot） |
 
-四件事：
+六件事：
 
 | 能力 | 怎么填 | 落到检索/交付上的样子 |
 |---|---|---|
 | 报告输出方式 | 顶部三选一：只给文件 / 只在聊天中呈现 / 文件 + 聊天 | 存进 `settings.json` 的 `delivery.mode`；`chat` 不写文件、正文直接进对话，`both` 两者都做 |
+
+| 事件程度 | 「事件程度」页签三选一：大 / 中 / 小 | 存进 `settings.json` 的 `eventScale`；采集脚本据此限制每板块候选数，报告每条标注【大】/【中】/【小】 |
+| 报告格式 | 「报告格式」页签二选一：表格（默认）/ 分条 | 存进 `settings.json` 的 `reportFormat`；报告按它排版，默认每板块一张表 |
+| 博主动态原链接 | 「博主」页签底部的开关：显示 / 不显示 | 存进 `settings.json` 的 `showPostLinks`；关掉后报告里的博主动态只保留内容与转评赞数据、不附原文链接 |
+| 博主要点字数 | 「博主」页签的「要点字数」：微博 / B 站分别选 20 / 40 / 60 / 80 字挡位，或直接输入自定义值（10–200） | 存进 `settings.json` 的 `pointLength`（`{ weibo, bili }`）；脚本输出的 `pointLength` 就是报告里该平台要点字数的下限，默认微博 20、B 站 50 |
+| AI 总结（按平台） | 「博主」页签的「AI 总结」：B 站可开启 / 关闭，微博显示「平台无接口」 | 存进 `settings.json` 的 `aiSummary`（`{ weibo, bili }`）；B 站开启时脚本取平台 AI 总结并用缓存 + 串行节流，关闭时脚本不取、由模型读标签与简介写一句评论 |
 
 原有三件事：
 
