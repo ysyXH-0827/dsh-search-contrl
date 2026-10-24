@@ -140,6 +140,10 @@ for (const expected of [
   '博主',
   '历史版本',
   '登录 Cookie',
+  '报告输出方式',
+  '只给文件',
+  '只在聊天中呈现',
+  '文件 + 聊天',
   '已保存',
   '清空自定义项',
 ]) {
@@ -154,8 +158,23 @@ assert.equal(link.platform, 'B站');
 assert.equal(exports.describeLink('not a url'), null);
 assert.equal(exports.describeLink('https://example.com/x'), null);
 
+assert.ok(
+  source.includes('features?.delivery !== true'),
+  'the card must detect a Host that is still running a pre-2.2.0 plugin'
+);
+assert.ok(
+  source.includes('被正在运行的旧版服务端丢弃了'),
+  'the card must explain a delivery save that the old Host dropped, not snap back silently'
+);
+assert.ok(
+  source.includes('当前 DSH 进程里加载的仍是 2.2.0 之前的插件'),
+  'the delivery panel must warn while the Host is stale'
+);
+
 console.log('ok   settings.section「搜索控制」registers in the settings sidebar');
 console.log('ok   module loads and registers plugins.row.config under the patch row id');
 console.log('ok   the settings card renders its tabs, status and footer');
+console.log('ok   the card offers the three report delivery modes');
+console.log('ok   a stale Host is reported instead of silently reverting the delivery mode');
 console.log('ok   creator links map to a platform and domain');
 console.log('\nall client checks passed');
