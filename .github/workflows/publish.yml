@@ -1,0 +1,60 @@
+name: publish
+
+# Publishing runs from a tag, using npm trusted publishing (OIDC). There is no
+# NPM_TOKEN secret: the CLI exchanges a short-lived workflow identity token for
+# publish rights, so nothing long-lived can leak or expire.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Pack and check without publishing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Refuse a tag that does not match package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          pkg="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+          echo "tag and package.json agree on $pkg"
+
+      - name: Install the DSH schema peer
+        run: npm install --no-save @deepseek-ai/schemastery@^3
+
+      - name: Run the test suite
+        run: npm test
+
+      - name: Publish
+        if: ${{ !inputs.dry_run }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm view "dsh-search-contrl@$version" version >/dev/null 2>&1; then
+            echo "dsh-search-contrl@$version is already on the registry; nothing to publish (tag replay is a no-op)"
+            exit 0
+          fi
+          npm publish --access public
+
+      - name: Dry run
+        if: ${{ inputs.dry_run }}
+        run: npm publish --dry-run --access public
