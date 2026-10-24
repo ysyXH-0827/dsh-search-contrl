@@ -2,7 +2,7 @@
 // daily-collect.mjs — 日报「采集阶段」脚本：并发拉取科技/汽车/AI 的公开 RSS，按板块归类、按日期过滤，输出候选清单。
 // 目的：把日报从「多轮模型往返 + 逐条抓取」压成「1 次脚本（约 1–2 秒）+ 1 次整理」。
 // 用法：
-//   node scripts/daily-collect.mjs                          # 今日，8 个 RSS 源，约 1–2 秒
+//   node scripts/daily-collect.mjs                          # 今日，14 个 RSS 源，约 1–2 秒
 //   node scripts/daily-collect.mjs --date=2026-10-24 --days=3
 //   node scripts/daily-collect.mjs --max=10 --out=reports/_data/daily-2026-10-24.json
 //   node scripts/daily-collect.mjs --bing="固态电池 量产|光刻机"   # 额外补 Bing 免费 RSS 关键词检索
@@ -50,14 +50,15 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 // ── 源 ────────────────────────────────────────────────────────────────
 // 只收录实测可用的公开 RSS（2026-10-24 逐个校验过 item 数）：
-// ithome 60 / leiphone 20 / electrek 100 / insideevs 20 / ifanr 20 / solidot 20 /
+// ithome 60 / 36kr 27 / geekpark 24 / infoq 20 / leiphone 20 / electrek 81 / insideevs 19 / ifanr 20 / solidot 20 /
 // techcrunch 20 / ars 20 / tmtpost 13 / qbitai 10 / verge 10 / sspai 10
 const FEEDS = [
   { id: 'ithome', url: 'https://www.ithome.com/rss/', lang: 'zh', note: 'IT之家：手机/芯片/AI 综合' },
   { id: 'leiphone', url: 'https://www.leiphone.com/feed', lang: 'zh', note: '雷锋网：AI/产业/车企' },
   { id: 'ifanr', url: 'https://www.ifanr.com/feed', lang: 'zh', note: '爱范儿：手机/汽车/早报' },
   { id: 'tmtpost', url: 'https://www.tmtpost.com/rss', lang: 'zh', note: '钛媒体：产业/科技商业' },
-  { id: 'qbitai', url: 'https://www.qbitai.com/feed', lang: 'zh', note: '量子位：国内 AI' },
+  { id: '36kr', url: 'https://www.36kr.com/feed', lang: 'zh', note: '36氪：商业/创投/AI 应用' },
+  { id: 'infoq', url: 'https://www.infoq.cn/feed', lang: 'zh', note: 'InfoQ 中国：开发/AI 工程/架构' },
   { id: 'solidot', url: 'https://www.solidot.org/index.rss', lang: 'zh', note: 'Solidot：科学/安全/开源' },
   { id: 'sspai', url: 'https://sspai.com/feed', lang: 'zh', note: '少数派：软件/效率' },
   { id: 'geekpark', url: 'https://www.geekpark.net/rss', lang: 'zh', note: '极客公园：科技产业/访谈' },
