@@ -26,6 +26,3 @@ npm-debug.log*
 
 # Scratch workspace
 .work/
-
-# Release helper (kept outside version control)
-.publish-tmp.mjs
