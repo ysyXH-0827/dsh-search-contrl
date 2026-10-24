@@ -244,6 +244,7 @@ await test('the bridge routes save, describe and roll back', async () => {
   const first = JSON.parse(firstResponse.body);
   assert.equal(first.ok, true);
   assert.equal(first.value.counts.total, 0);
+  assert.equal(first.value.meta.features.delivery, true, 'describe must advertise the delivery capability');
 
   const save = byPath('save');
   const seedResponse = fakeResponse();
@@ -357,6 +358,18 @@ await test('a saved delivery mode survives a write and a rollback', async () => 
   const restored = restoreSettings(dir, snapshot.id);
   assert.equal(restored.ok, true);
   assert.equal(restored.value.delivery.mode, 'chat', 'rolling back restores the earlier delivery mode too');
+});
+
+await test('the save route echoes the delivery mode back to the card', async () => {
+  const dir = tempDir();
+  const routes = buildSettingsRoutes({ dataDir: dir, pluginVersion: 'test', historyLimit: 10 });
+  const save = routes.find(route => route.path.endsWith('save'));
+  const response = fakeResponse();
+  await save.handler(fakeRequest({ settings: { delivery: { mode: 'chat' } } }), response);
+  const body = JSON.parse(response.body);
+  assert.equal(body.ok, true);
+  assert.equal(body.value.settings.delivery.mode, 'chat', 'a save must not drop the delivery mode');
+  assert.equal(readSettings(dir).value.delivery.mode, 'chat', 'the stored value must match what the card sent');
 });
 
 const failed = failures.length;

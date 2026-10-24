@@ -1,6 +1,6 @@
 {
   "name": "dsh-search-contrl",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "DSH-Search-Contrl: a DSH skill/plugin for scoped web search and Chinese daily reports, with a settings GUI for custom search sources, arbitrary topics (not only tech), creator-link scoped search, and one-click rollback.",
   "private": false,
   "type": "module",
