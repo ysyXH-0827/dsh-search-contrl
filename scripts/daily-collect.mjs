@@ -6,8 +6,11 @@
 //   node scripts/daily-collect.mjs --date=2026-10-24 --days=3
 //   node scripts/daily-collect.mjs --max=10 --out=reports/_data/daily-2026-10-24.json
 //   node scripts/daily-collect.mjs --bing="固态电池 量产|光刻机"   # 额外补 Bing 免费 RSS 关键词检索
-//   node scripts/daily-collect.mjs --days=7 --digest          # 紧凑摘要（每板块 N 行，给模型读，省 80% token）
-// 输出：JSON {date, window, feeds{ok[],fail[]}, boards{板块:[...]}, others[], stats}；带 --digest 输出纯文本摘要
+//   node scripts/daily-collect.mjs --days=7                   # 默认输出紧凑摘要（每板块 3–6 行，省 ~90% token）
+//   node scripts/daily-collect.mjs --days=7 --json            # 需要整份 JSON 时显式要求（约 86KB，慎用）
+//   node scripts/daily-collect.mjs --concurrency=5 --total-timeout=45000   # 有界并发 / 总时长看门狗（默认 5 源 / 45 秒）
+//   node scripts/daily-collect.mjs --refresh --cache-ttl=0    # 绕过来源缓存（默认 10 分钟内命中缓存，重跑不压源）
+// 输出：默认纯文本摘要；--json 输出 JSON {date, window, feeds{ok[],fail[]}, boards{板块:[...]}, others[], stats}
 
 import fs from 'node:fs';
 
@@ -47,6 +50,31 @@ const policy = SCALE_POLICY[scale];
 const maxPerBoard = Math.min(Number(args.max ?? policy.maxPerBoard), 60);
 const outFile = args.out ?? null;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+// ── 源缓存：同一窗口重跑（多次整理/补跑/重试）不再压源，顺带避开 429 ──────
+// 默认 10 分钟内命中；--cache-ttl=<秒> 调 TTL，0 关闭整层；--refresh 强制重抓。
+const CACHE_DIR = 'scripts/.cache/feeds';
+const CACHE_TTL_MS = Math.max(0, Number(args['cache-ttl'] ?? 600) * 1000);
+const CACHE_STALE_MS = 24 * 3600_000;   // 抓取失败时允许回退的「陈旧」上限
+const cacheOn = CACHE_TTL_MS > 0 && !args.refresh;
+const cachePath = key => `${CACHE_DIR}/${String(key).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80)}.json`;
+
+function cacheRead(key) {
+  if (!cacheOn) return null;
+  try {
+    const e = JSON.parse(fs.readFileSync(cachePath(key), 'utf8'));
+    return Array.isArray(e?.items) ? { at: Number(e.at ?? 0), items: e.items } : null;
+  } catch { return null; }
+}
+
+function cacheWrite(key, items) {
+  // 空结果不落盘：否则一次 429 的「0 条」会被当成事实缓存一整天。
+  if (!cacheOn || !Array.isArray(items) || !items.length) return;
+  try {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(cachePath(key), JSON.stringify({ at: Date.now(), key: String(key), items }));
+  } catch { /* 缓存写不进不能影响采集 */ }
+}
 
 // ── 源 ────────────────────────────────────────────────────────────────
 // 只收录实测可用的公开 RSS（2026-10-24 逐个校验过 item 数）：
@@ -162,26 +190,87 @@ const t0 = Date.now();
 const errors = [];
 const okFeeds = [];
 const all = [];
+let cacheHits = 0;
+let staleHits = 0;
 
-const jobs = FEEDS.map(async feed => {
+// 有界并发：14 个源一次性全发会同时压两端 socket，也是 undici 断言崩溃的诱因之一（LESSONS 规则 #7）。
+async function mapLimit(list, limit, fn) {
+  const out = new Array(list.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, list.length) }, async () => {
+    while (next < list.length) {
+      const i = next++;
+      out[i] = await fn(list[i], i);
+    }
+  }));
+  return out;
+}
+
+const CONCURRENCY = Math.max(1, Number(args.concurrency ?? 5));
+
+const jobs = [mapLimit(FEEDS, CONCURRENCY, async feed => {
+  const push = items => { for (const it of items) all.push({ ...it, source: feed.id, at: toBeijingTime(it.atRaw) }); };
+  const hit = cacheRead(feed.id);
+  if (hit && Date.now() - hit.at <= CACHE_TTL_MS) {
+    cacheHits += 1;
+    okFeeds.push({ id: feed.id, items: hit.items.length, cached: true });
+    push(hit.items);
+    return;
+  }
   try {
     const items = await fetchFeed(feed);
+    cacheWrite(feed.id, items);
     okFeeds.push({ id: feed.id, items: items.length });
-    for (const it of items) all.push({ ...it, source: feed.id, at: toBeijingTime(it.atRaw) });
+    push(items);
   } catch (e) {
+    // 抓取失败先看有没有 24h 内的旧缓存：少一个源的候选，比整次采集缺一块代价大。
+    if (hit && Date.now() - hit.at <= CACHE_STALE_MS) {
+      staleHits += 1;
+      errors.push(`${feed.id}: 抓取失败，回退 ${Math.round((Date.now() - hit.at) / 60000)} 分钟前缓存（${String(e?.message ?? e).slice(0, 40)}）`);
+      okFeeds.push({ id: feed.id, items: hit.items.length, cached: true, stale: true });
+      push(hit.items);
+      return;
+    }
     errors.push(`${feed.id}: ${String(e?.message ?? e).slice(0, 80)}`);
   }
-});
+})];
 
 const bingQueries = args.bing ? String(args.bing).split('|').map(s => s.trim()).filter(Boolean) : [];
 const bingJobs = bingQueries.map(async q => {
+  const key = `bing-${q}`;
+  const push = items => { for (const it of items) all.push({ ...it, atRaw: it.at, title: it.title }); };
+  const hit = cacheRead(key);
+  if (hit && Date.now() - hit.at <= CACHE_TTL_MS) { cacheHits += 1; push(hit.items); return; }
   try {
     const items = await bingRss(q);
-    for (const it of items) all.push({ ...it, atRaw: it.at, title: it.title });
+    cacheWrite(key, items);
+    push(items);
   } catch (e) { errors.push(`bing:${q}: ${String(e?.message ?? e).slice(0, 60)}`); }
 });
 
-await Promise.all([...jobs, ...bingJobs]);
+// ── 进程级兜底：undici 偶发在 socket end 回调里抛断言（Parser.finish assert(!this.paused)）──
+// 该异常不在 Promise 拒绝链上，per-feed try/catch 接不住 → 进程直接退出、stdout 归零，整份候选白跑。
+// 记一条降级后继续：少一个源，好过整次采集丢掉。
+let degraded = 0;
+for (const ev of ['uncaughtException', 'unhandledRejection']) {
+  process.on(ev, e => {
+    degraded += 1;
+    errors.push(`${ev}: ${String(e?.message ?? e).slice(0, 120)}`);
+  });
+}
+// 兜底之后还得有出口：丢掉的那个 promise 永不 settle，Promise.all 会挂住，
+// 所以加一个总时长看门狗，到点就用「已经收上来的条目」继续跑完。
+const TOTAL_TIMEOUT_MS = Math.max(3000, Number(args['total-timeout'] ?? 45000));
+let deadlineTimer;
+const deadline = new Promise(res => {
+  deadlineTimer = setTimeout(() => {
+    degraded += 1;
+    errors.push(`deadline: ${TOTAL_TIMEOUT_MS}ms 未收完，用已收条目继续`);
+    res(null);
+  }, TOTAL_TIMEOUT_MS);
+});
+await Promise.race([Promise.all([...jobs, ...bingJobs]), deadline]);
+clearTimeout(deadlineTimer);
 
 // 日期窗口过滤（无日期的保留，标注 unknown）
 const windowed = all.filter(it => {
@@ -270,6 +359,8 @@ const payload = {
     totalItems: windowed.length,
     uniqueItems: uniqueItems.length,
     dupTitlesDropped: dupTitles,
+    cacheHits,
+    staleHits,
     boardCounts: Object.fromEntries(Object.entries(boards).map(([b, v]) => [b, v.length])),
     byDay: byDayCounts(uniqueItems),
     bySource: bySourceCounts(uniqueItems),
@@ -307,6 +398,8 @@ if (archiveDir) {
   if (!outFile) process.exit(0);
 }
 process.stderr.write(`[daily-collect] ${windowed.length} 条 / ${okFeeds.length}源 / ${payload.stats.elapsedMs}ms / 事件程度 ${scale}（目标 ${policy.reportItems} 条） ${JSON.stringify(payload.stats.boardCounts)}\n`);
+if (degraded) process.stderr.write(`[daily-collect] ⚠️ 降级 ${degraded} 次（崩溃/超时兜底），结果可能缺少个别源\n`);
+if (cacheHits || staleHits) process.stderr.write(`[daily-collect] 源缓存命中 ${cacheHits} 个源（陈旧回退 ${staleHits}）${cacheOn ? '' : '；缓存已关闭'}\n`);
 if (errors.length) process.stderr.write(`[daily-collect] 失败: ${errors.join('; ')}\n`);
 if (watchlist.length) {
   const who = [...new Set(watchlistHits.map(h => h.name))];
@@ -316,23 +409,36 @@ if (watchlist.length) {
 // ── --audit：覆盖度审计（哪天/哪个源偏少，直接暴露「遗漏」而不是事后猜）──
 if (args.audit) {
   const dayCounts = payload.stats.byDay;
-  const entries = Object.entries(dayCounts);
-  const thin = entries.filter(([, n]) => n < 5);
+  // 关键：必须遍历「请求窗口里的每一天」。只遍历 dayCounts 的话，一条数据都没有的日子根本不会出现在表里，
+  // 于是无论缺多少天都会报「✅ 覆盖正常」——这就是旧版的假绿灯（--days=14 只盖住 9 天仍报正常）。
+  const dayList = Array.from({ length: days }, (_, i) =>
+    new Date(from.getTime() + i * 86400_000 + 8 * 3600_000).toISOString().slice(0, 10));
+  const missing = dayList.filter(d => !dayCounts[d]);
+  const thin = dayList.filter(d => dayCounts[d] && dayCounts[d] < 5);
+  const noDate = windowed.filter(it => !it.at).length;
   const lines = [`# 覆盖审计 ${date}（窗口 ${days} 天，去重后 ${uniqueItems.length} 条，标题重复丢弃 ${dupTitles} 条）`, ''];
   lines.push('| 日期 | 条数 |', '|---|---|');
-  for (const [d, n] of entries) lines.push(`| ${d} | ${n} |`);
+  for (const d of dayList) lines.push(`| ${d}${missing.includes(d) ? '（缺失）' : ''} | ${dayCounts[d] ?? 0} |`);
   lines.push('', '| 源 | 条数 |', '|---|---|');
   for (const [s, n] of Object.entries(payload.stats.bySource)) lines.push(`| ${s} | ${n} |`);
-  if (thin.length) lines.push('', `⚠️ 覆盖不足（<5 条）：${thin.map(([d, n]) => `${d}(${n})`).join('、')} —— 该日请单独补搜或读归档。`);
-  else lines.push('', '✅ 每天都有 ≥5 条，覆盖正常。');
-  if (errors.length) lines.push('', `⚠️ 源失败：${errors.join('；')}`);
+  // 连续覆盖天数（截至窗口末日往前数）：这才是「多长的窗口还有真实数据」的可行动指标。
+  let run = 0;
+  for (let i = dayList.length - 1; i >= 0 && dayCounts[dayList[i]]; i--) run += 1;
+  if (missing.length) lines.push('', `❌ 窗口内 ${missing.length} 天没有任何条目：${missing.join('、')} —— 请求天数超过了源能覆盖的深度（RSS 只保留最近 20–100 条）。`);
+  if (thin.length) lines.push('', `⚠️ 覆盖不足（<5 条）：${thin.map(d => `${d}(${dayCounts[d]})`).join('、')} —— 该日请单独补搜或读归档。`);
+  if (!missing.length && !thin.length) lines.push('', '✅ 窗口内每天都有 ≥5 条，覆盖正常。');
+  lines.push('', `连续覆盖（截至 ${dayList[dayList.length - 1]}）：${run} / ${days} 天${run < days ? ' —— 再往前需要读 reports/_data/archive/ 补' : ''}`);
+  if (noDate) lines.push(`注：另有 ${noDate} 条无发布日期，未计入日期表。`);
+  if (errors.length) lines.push('', `⚠️ 源失败/降级：${errors.join('；')}`);
   process.stdout.write(lines.join('\n') + '\n');
   process.exit(0);
 }
 
-// ── --digest：给模型读的紧凑清单（每行：日期｜标题｜链接），比整份 JSON 省约 80% token ──
+// ── 默认输出：给模型读的紧凑清单（每行：日期｜标题｜链接），比整份 JSON 省约 90% token ──
+// 实测 --days=7：摘要 8,614 字符 vs 整份 JSON 86,635 字符（10.1×）。整份 JSON 改成显式 --json 才吐：
+// 「想看一眼」和「要喂下游」是两种用法，默认取便宜的那个，--digest 保留兼容（等价于默认）。
 // 每板块行数：单日默认 3 行、多日窗口默认 6 行（--digest-max=N 可调）：日报一天每板块顶多 2–3 条，周报要铺开。
-if (args.digest) {
+if (!args.json) {
   const cut = s => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
   // 单日默认 3 行；多日窗口（周报/月报）默认 6 行，否则模型看不全 30+ 条候选。
   const capDefault = Number(args.days ?? 1) > 1 ? 6 : 3;
@@ -352,6 +458,7 @@ if (args.digest) {
     if (watchlistHits.length) for (const h of watchlistHits.slice(0, 20)) lines.push(`${(h.at ?? '').slice(0, 16)}｜${h.name}｜${cut(h.title)}｜${h.url}`);
     else lines.push('跟踪清单：本次无命中');
   }
+  process.stderr.write('[daily-collect] 完整 JSON 用 --json 或 --out=<path>\n');
   process.stdout.write(lines.join('\n') + '\n');
   process.exit(0);
 }

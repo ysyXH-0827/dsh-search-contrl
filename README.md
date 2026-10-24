@@ -354,8 +354,10 @@ pnpm install
 | --- | --- | --- | --- |
 | 31 天归档扫描 | 串行 13.9 s | 并发 8：0.38 s（冷）/ 24 ms（热缓存） | 约 36× / 580× |
 | 6 条 Bing 查询 | 串行 1.41 s | 并发 4：0.60 s / 5 ms（热缓存） | 2.3× / 280× |
+| 7 天窗采集（14 源） | 冷跑 2.66 s | 源缓存热跑 26–28 ms（14 源全命中） | 约 95× |
+| 检索 / 提取缓存（跨进程） | 冷进程 2 次上游请求 | 热进程 0 次（磁盘 tier 命中） | 重复成本归零 |
 
-工具位置：`scripts/scan-archives.mjs`、`scripts/bing-search.mjs`；两者都带磁盘缓存，重复采集同一时段基本零成本。
+工具位置：`scripts/scan-archives.mjs`、`scripts/bing-search.mjs`；两者都带磁盘缓存，重复采集同一时段基本零成本。采集脚本的源缓存见 `scripts/.cache/feeds/`，检索缓存的磁盘层在 `~/.dsh/plugin-data/dsh-search-contrl/cache/`（`SEARCH_CONTRL_DATA_DIR` 可改向，`DSH_SEARCH_CONTRL_NO_DISK_CACHE=1` 整层关闭），Host 重启不再清零。
 ## 使用建议
 
 厂商官网的规格页路径并不统一，猜错会拿到 404：规格页常见 `/spec` 与 `/specs` 两种写法，产品资讯多在 `/news/`，活动页在 `/activity/`，上市公告在 `/notice-*`。建议先用 `search` 配合 `include_domains` 定位正确链接，再用 `extract` 取回正文，不要靠猜路径。
@@ -461,7 +463,8 @@ pnpm install
 
 ```bash
 node scripts/daily-collect.mjs --date=2026-10-24 --max=12            # 采集当日候选（14 个 RSS 源，约 1–2 秒）
-node scripts/daily-collect.mjs --date=2026-10-25 --days=7 --digest   # 一周紧凑摘要（每板块 3 行，省 ~80% token）
+node scripts/daily-collect.mjs --date=2026-10-25 --days=7            # 一周紧凑摘要（每板块 6 行，默认输出，省 ~90% token）
+node scripts/daily-collect.mjs --days=7 --json                       # 需要整份 JSON 时才显式要求（约 87K 字符，慎用）
 node scripts/daily-collect.mjs --days=7 --audit                      # 覆盖度审计：哪一天/哪个源条数偏少
 node scripts/watchlist.mjs --list                                    # 新品牌/创业者公司跟踪清单
 node scripts/watchlist.mjs --add="关键词A|关键词B" --name="实体名"    # 往清单里加实体
@@ -471,6 +474,8 @@ node scripts/watchlist.mjs --add="关键词A|关键词B" --name="实体名"    #
 - 同题新闻按**标题归一化后前 20 字**去重（跨站转载只留最早一条），`stats.dupTitlesDropped` 是丢弃数。
 - `--audit` 输出按天、按源的条数表，并对 <5 条的日子给出「该日请单独补搜或读归档」提示 —— 这是发现「经常遗漏」的直接手段。
 - `--others-max` 控制未归类条目的保留上限（默认 120），`--watchlist=0` 可临时关闭清单比对。
+- 默认输出是**紧凑摘要**（`--days=7` 实测 8.6K 字符 vs 整份 JSON 87K 字符，10.1×）；整份 JSON 要显式 `--json` 或 `--out=<path>`，`--digest` 仍接受但与默认等价。
+- 源结果默认落 `scripts/.cache/feeds/`（TTL 10 分钟）：同一窗口重复整理从 ~2.6 秒降到 ~30 毫秒且不再压源；`--refresh` 强制重抓、`--cache-ttl=0` 关掉整层；某个源抓取失败会回退到 24 小时内的旧缓存，并在 `feeds.fail` 里写明回退原因。
 
 ### 每日归档 + 多日合并（2.2.9 起）
 
