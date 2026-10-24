@@ -303,3 +303,9 @@ CI 的 runner 比本机快，撞毫秒的概率高得多，于是同一条断言
 | 失效脚本 | `publish.ps1` 只被自己注释引用，发布早已改走 `.github/workflows/publish.yml` | 删除，历史留在 git 里 |
 
 **规律**：删代码前先回答“谁在用”，答案要来自工具而不是印象；删完必须跑全部测试——这次就有一条静态断言因为去重而失效（它断言“只出现一次 client 调用”），改成断言“两个 action 都走同一个函数”才真正守住这次重构的意图。
+
+### 补记：审计范围必须包含 CI 里的内联测试
+
+第一轮清理把 `lib/bing.js` 的 `buildBingQuery`/`buildBingUrl`/`parseBingRss` 判成“仅内部使用”并去掉导出，结果 `verify` 工作流第 6 步 `Test the keyless Bing adapter offline` 直接失败——它用 `node --input-type=module -e` 内联 import 了这三个函数。
+
+原因：审计脚本只扫了 `lib/` 与 `scripts/` 的 import，没扫 `.github/workflows/*.yml` 里的内联代码。**规律**：判断“有没有人在用”时，使用者可能住在一段 YAML 字符串里；grep 的范围要和“会被执行的代码”范围一致，而不是和“看起来像源码的文件”一致。
