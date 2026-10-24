@@ -1,6 +1,6 @@
 {
   "name": "dsh-search-contrl",
-  "version": "2.2.10",
+  "version": "2.2.11",
   "description": "DSH-Search-Contrl: a DSH skill/plugin for scoped web search and Chinese daily reports, with a settings GUI for custom search sources, arbitrary topics (not only tech), creator-link scoped search, and one-click rollback.",
   "private": false,
   "type": "module",
@@ -24,7 +24,10 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts/daily-collect.mjs",
+    "scripts/watchlist.mjs",
+    "scripts/archive-merge.mjs"
   ],
   "keywords": [
     "dsh",
