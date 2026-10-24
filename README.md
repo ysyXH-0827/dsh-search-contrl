@@ -176,6 +176,17 @@ pnpm install
 
 一次调用并发读全部已保存博主（B站走签名空间 API、微博走 ajax 时间线），返回 `creators[]`，单个博主失败不影响其它。实测 2 个博主：串行 754 ms → 并发 462 ms。
 
+### 量一份报告要多少 token（report-metrics）
+
+```bash
+node scripts/report-metrics.mjs ../reports/week-2026-10-19_10-24/README.md
+node scripts/report-metrics.mjs <报告.md> --check-links --concurrency 6 --json
+```
+
+输出字节 / 字符 / 行数、## 板块数、### 条目数、唯一外链数、待补标记数、token 估算区间（中文 0.55–0.72、ASCII 0.22–0.28 token/字符）与渲染耗时；加 `--check-links` 会并发复测外链（HEAD 被反爬拦时自动回退 GET）。
+
+实测：3 万字周报 29,274 B / 13 板块 / 46 条目 / 76 外链 / ≈6,107 token，读 + 统计 + 渲染合计 **0.53 ms**。重发报告请走这条，不要重跑采集（规则 25）。
+
 ### 检索太慢怎么办
 
 - 同一博主/视频在 **60 秒内重复问**会直接命中进程内缓存（列表 60 s、视频详情与 AI 总结 10 min、WBI 密钥 10 min），第二次通常是 1 ms 级。
