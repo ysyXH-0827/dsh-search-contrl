@@ -471,3 +471,23 @@ node scripts/watchlist.mjs --add="关键词A|关键词B" --name="实体名"    #
 - 同题新闻按**标题归一化后前 20 字**去重（跨站转载只留最早一条），`stats.dupTitlesDropped` 是丢弃数。
 - `--audit` 输出按天、按源的条数表，并对 <5 条的日子给出「该日请单独补搜或读归档」提示 —— 这是发现「经常遗漏」的直接手段。
 - `--others-max` 控制未归类条目的保留上限（默认 120），`--watchlist=0` 可临时关闭清单比对。
+
+### 每日归档 + 多日合并（2.2.9 起）
+
+RSS 源只保留最近 20–60 条，**一周前的条目会被挤出**，所以「周报要覆盖完整 7 天」靠临时抓是补不回来的 —— 必须每天落一份快照。
+
+```bash
+node scripts/daily-collect.mjs --archive                 # 归档今天到 reports/_data/archive/<日期>.json（幂等）
+node scripts/daily-collect.mjs --archive --max=60 --others-max=120
+node scripts/archive-merge.mjs --days=7 --digest         # 从归档拼出 7 天窗口，缺哪天报哪天
+node scripts/archive-merge.mjs --days=7 --out=week.json  # 输出合并后的 JSON
+```
+
+- 归档文件按**采集目标日**命名（`--date` 决定），补跑历史窗口也会落到正确日期；同一日重复跑只覆盖、不累加。
+- `archive-merge` 会去重（URL + 标题归一化），并列出缺档日期：**缺档就在报告里写明，不要用相邻日期顶替**。
+- 自动化（零 token）：Windows 计划任务每天 23:50 执行 `scripts/daily-archive.cmd`；macOS/Linux 用 cron：
+  ```cron
+  50 23 * * * cd /path/to/dsh && node scripts/daily-collect.mjs --archive --max=60 --others-max=120
+  ```
+
+

@@ -51,7 +51,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 // ── 源 ────────────────────────────────────────────────────────────────
 // 只收录实测可用的公开 RSS（2026-10-24 逐个校验过 item 数）：
 // ithome 60 / 36kr 27 / geekpark 24 / infoq 20 / leiphone 20 / electrek 81 / insideevs 19 / ifanr 20 / solidot 20 /
-// techcrunch 20 / ars 20 / tmtpost 13 / qbitai 10 / verge 10 / sspai 10
+// techcrunch 20 / ars 20 / tmtpost 19 / 36kr 27 / infoq 20 / verge 10 / sspai 10
 const FEEDS = [
   { id: 'ithome', url: 'https://www.ithome.com/rss/', lang: 'zh', note: 'IT之家：手机/芯片/AI 综合' },
   { id: 'leiphone', url: 'https://www.leiphone.com/feed', lang: 'zh', note: '雷锋网：AI/产业/车企' },
@@ -280,6 +280,20 @@ const json = JSON.stringify(payload, null, 1);
 if (outFile) {
   fs.mkdirSync(String(outFile).replace(/[\\/][^\\/]+$/, ''), { recursive: true });
   fs.writeFileSync(outFile, json);
+}
+
+// ── --archive：按天落一份快照（RSS 只留最近 20–60 条，周初内容必须靠归档补）──
+// 设计成幂等：同一天重复跑只覆盖当天文件，不会重复累加。
+const archiveDir = args.archive ? String(args.archive === 'true' ? 'reports/_data/archive' : args.archive) : null;
+if (archiveDir) {
+  fs.mkdirSync(archiveDir, { recursive: true });
+  const day = date; // 用采集目标日，而不是运行日：补跑历史窗口也能落到正确日期
+  const file = `${archiveDir}/${day}.json`;
+  fs.writeFileSync(file, json);
+  fs.appendFileSync(`${archiveDir}/index.log`, `${new Date().toISOString()} ${day} ${payload.stats.uniqueItems} 条 ${file}\n`);
+  process.stderr.write(`[daily-collect] 已归档 ${file}（${payload.stats.uniqueItems} 条）\n`);
+  // 定时任务场景：归档后不再往 stdout 喷整份 JSON（几十 KB），有 --out 时才输出
+  if (!outFile) process.exit(0);
 }
 process.stderr.write(`[daily-collect] ${windowed.length} 条 / ${okFeeds.length}源 / ${payload.stats.elapsedMs}ms / 事件程度 ${scale}（目标 ${policy.reportItems} 条） ${JSON.stringify(payload.stats.boardCounts)}\n`);
 if (errors.length) process.stderr.write(`[daily-collect] 失败: ${errors.join('; ')}\n`);
