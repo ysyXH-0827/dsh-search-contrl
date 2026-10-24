@@ -3,7 +3,7 @@
  * archive-digest.mjs — 把一份归档快照渲染成人可读的 Markdown（不需要模型）。
  *
  * 用法：
- *   node scripts/archive-digest.mjs --date=2026-10-24                       # 输出到 stdout
+ *   node scripts/archive-digest.mjs --date=2026-10-24 --archive=archive                       # 输出到 stdout
  *   node scripts/archive-digest.mjs --date=2026-10-24 --out=reports/_data/digest/2026-10-24.md
  *   node scripts/archive-digest.mjs --file=reports/_data/archive/2026-10-24.json
  *   node scripts/archive-digest.mjs --date=2026-10-24 --max=6 --window=all  # 不按日期过滤，列出全部
@@ -27,7 +27,7 @@ const today = fmt(Date.now());
 const date = args.date ?? today;
 const max = Math.max(1, Number(args.max ?? 8));
 const windowMode = String(args.window ?? 'day'); // day | all
-const file = args.file ?? `reports/_data/archive/${date}.json`;
+const file = args.file ?? path.join(String(args.archive ?? 'reports/_data/archive'), `${date}.json`);
 
 if (!fs.existsSync(file)) {
   process.stderr.write(`[archive-digest] 找不到快照：${file}\n`);
