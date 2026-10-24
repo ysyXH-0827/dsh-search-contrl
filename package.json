@@ -1,15 +1,17 @@
 {
   "name": "dsh-search-contrl",
-  "version": "2.2.6",
+  "version": "2.2.7",
   "description": "DSH-Search-Contrl: a DSH skill/plugin for scoped web search and Chinese daily reports, with a settings GUI for custom search sources, arbitrary topics (not only tech), creator-link scoped search, and one-click rollback.",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/search-tool.js && node --check lib/config.js && node --check lib/custom-search.js && node --check lib/settings-store.js && node --check lib/settings-api.js && node --check lib/client.js && node --check lib/cookie-jar.js && node --check lib/cookie-capture.js && node --check lib/bilibili-api.js && node --check scripts/report-metrics.mjs && node --check scripts/test-metrics.mjs",
+    "check": "node --check lib/index.js && node --check lib/search-tool.js && node --check lib/config.js && node --check lib/custom-search.js && node --check lib/settings-store.js && node --check lib/settings-api.js && node --check lib/client.js && node --check lib/cookie-jar.js && node --check lib/cookie-capture.js && node --check lib/bilibili-api.js && node --check scripts/report-metrics.mjs && node --check scripts/test-metrics.mjs && node --check scripts/daily-collect.mjs && node --check scripts/watchlist.mjs",
     "test": "node scripts/test-settings.mjs && node scripts/test-client.mjs && node scripts/test-cookie.mjs && node scripts/test-bloggers.mjs && node scripts/test-metrics.mjs",
     "smoke": "node scripts/smoke-cdp.mjs",
-    "prepack": "node scripts/prepack.mjs"
+    "prepack": "node scripts/prepack.mjs",
+    "collect": "node scripts/daily-collect.mjs",
+    "watchlist": "node scripts/watchlist.mjs"
   },
   "exports": {
     ".": "./lib/index.js",

@@ -454,3 +454,20 @@ pnpm install
 ## 许可证
 
 [MIT](./LICENSE)
+
+## 采集工具脚本（2.2.7 起随包发布）
+
+插件包里带两个不依赖 Host 的命令行工具，用来把「多轮检索」压成「一次脚本 + 一次整理」：
+
+```bash
+node scripts/daily-collect.mjs --date=2026-10-24 --max=12            # 采集当日候选（14 个 RSS 源，约 1–2 秒）
+node scripts/daily-collect.mjs --date=2026-10-25 --days=7 --digest   # 一周紧凑摘要（每板块 3 行，省 ~80% token）
+node scripts/daily-collect.mjs --days=7 --audit                      # 覆盖度审计：哪一天/哪个源条数偏少
+node scripts/watchlist.mjs --list                                    # 新品牌/创业者公司跟踪清单
+node scripts/watchlist.mjs --add="关键词A|关键词B" --name="实体名"    # 往清单里加实体
+```
+
+- `daily-collect` 会顺带做**跟踪清单比对**：JSON 里给 `watchlistHits`，`--digest` 末尾带「## 跟踪清单命中」小节。
+- 同题新闻按**标题归一化后前 20 字**去重（跨站转载只留最早一条），`stats.dupTitlesDropped` 是丢弃数。
+- `--audit` 输出按天、按源的条数表，并对 <5 条的日子给出「该日请单独补搜或读归档」提示 —— 这是发现「经常遗漏」的直接手段。
+- `--others-max` 控制未归类条目的保留上限（默认 120），`--watchlist=0` 可临时关闭清单比对。
