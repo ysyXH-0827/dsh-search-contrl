@@ -8,8 +8,9 @@
  *   node scripts/archive-merge.mjs --days=7 --out=reports/_data/week-merged.json
  *   node scripts/archive-merge.mjs --dir=reports/_data/archive --digest --max=6
  *
- * 归档由 daily-collect.mjs --archive 产生（每次跑写 reports/_data/archive/<日期>.json）。
- * 缺哪天就报哪天，不拿相邻日期顶替。
+ * 归档由 daily-collect.mjs --archive 产生：reports/_data/archive/<日期>.json。
+ * 每份快照保存「那次抓到的全部条目」，所以某天没跑时，后一天的快照仍能补出前一天；
+ * 完全补不到的日期会被列进 missing —— 报告里必须写明，不要用相邻日期顶替。
  */
 import fs from 'node:fs';
 
@@ -27,54 +28,66 @@ const days = Math.max(1, Number(args.days ?? 7));
 const dir = String(args.dir ?? 'reports/_data/archive');
 const max = Math.max(1, Number(args.max ?? 8));
 
-function shiftDay(d, delta) {
-  const t = new Date(`${d}T00:00:00+08:00`).getTime() + delta * 86400_000;
-  return new Date(t + BJ).toISOString().slice(0, 10);
-}
+// 用北京时间切日期，避免 toISOString 的 UTC 偏移导致整体错一天
+const fmt = t => new Date(t + BJ).toISOString().slice(0, 10);
+const shiftDay = (d, delta) => fmt(new Date(`${d}T00:00:00+08:00`).getTime() + delta * 86400_000);
 
 const want = [];
 for (let i = days - 1; i >= 0; i--) want.push(shiftDay(date, -i));
 
-const present = [];
-const missing = [];
-const items = new Map(); // url -> item
+const snapshots = [];
+const unreadable = [];
+const items = new Map();
 const titleKeys = new Set();
 let dupTitles = 0;
 
-for (const day of want) {
-  const file = `${dir}/${day}.json`;
-  if (!fs.existsSync(file)) { missing.push(day); continue; }
+if (!fs.existsSync(dir)) {
+  process.stderr.write(`[archive-merge] 归档目录不存在：${dir}\n`);
+  process.stderr.write('[archive-merge] 先跑一次：node scripts/daily-collect.mjs --archive\n');
+  process.exit(2);
+}
+
+for (const f of fs.readdirSync(dir).filter(n => /^\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort()) {
+  const day = f.slice(0, 10);
   let data;
-  try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { missing.push(`${day}(损坏)`); continue; }
-  present.push(day);
-  const bucket = [];
-  for (const arr of Object.values(data.boards ?? {})) if (Array.isArray(arr)) bucket.push(...arr);
-  if (Array.isArray(data.others)) bucket.push(...data.others);
-  if (Array.isArray(data.watchlistHits)) for (const h of data.watchlistHits) bucket.push({ title: h.title, url: h.url, at: h.at, desc: '', source: 'watchlist' });
+  try { data = JSON.parse(fs.readFileSync(`${dir}/${f}`, 'utf8')); } catch { unreadable.push(day); continue; }
+  // 新格式 {uniqueItems}；旧格式 {boards, others}
+  const bucket = Array.isArray(data.allItems)
+    ? data.allItems
+    : Array.isArray(data.uniqueItems)
+    ? data.uniqueItems
+    : [...Object.values(data.boards ?? {}).flat(), ...(Array.isArray(data.others) ? data.others : [])];
+  snapshots.push({ day, count: bucket.length, targetDate: data.targetDate ?? day });
   for (const it of bucket) {
     if (!it?.url || items.has(it.url)) continue;
-    const tkey = String(it.title ?? '').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase().slice(0, 20);
-    if (tkey && titleKeys.has(tkey)) { dupTitles++; continue; }
-    if (tkey) titleKeys.add(tkey);
+    const key = String(it.title ?? '').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase().slice(0, 20);
+    if (key && titleKeys.has(key)) { dupTitles++; continue; }
+    if (key) titleKeys.add(key);
     items.set(it.url, it);
   }
 }
 
-const all = [...items.values()].sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')));
 const byDay = {};
-for (const it of all) {
-  const d = String(it.at ?? '').slice(0, 10) || 'unknown';
-  (byDay[d] ||= []).push(it);
+for (const day of want) byDay[day] = [];
+let outside = 0;
+for (const it of items.values()) {
+  const d = String(it.at ?? '').slice(0, 10);
+  if (byDay[d]) byDay[d].push(it);
+  else outside++;
 }
+for (const day of want) byDay[day].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+const missing = want.filter(d => byDay[d].length === 0);
+const all = want.flatMap(d => byDay[d]);
 
 const payload = {
   generatedAt: new Date().toISOString(),
   date,
   window: { days, from: want[0], to: want[want.length - 1] },
-  archive: { dir, present, missing },
+  archive: { dir, snapshots: snapshots.length, files: snapshots.map(s => s.day), unreadable, missing },
   byDay,
   items: all,
-  stats: { files: present.length, total: all.length, dupTitlesDropped: dupTitles },
+  stats: { snapshots: snapshots.length, total: all.length, outsideWindow: outside, dupTitlesDropped: dupTitles },
 };
 
 const json = JSON.stringify(payload, null, 1);
@@ -85,17 +98,18 @@ if (args.out) {
 
 const cut = s => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
 
-if (missing.length) process.stderr.write(`[archive-merge] 缺 ${missing.length} 天：${missing.join('、')}\n`);
-process.stderr.write(`[archive-merge] 归档 ${present.length}/${days} 天 → ${all.length} 条（丢弃同题 ${dupTitles} 条）\n`);
+process.stderr.write(`[archive-merge] 快照 ${snapshots.length} 份 → 窗口内 ${all.length} 条（丢弃同题 ${dupTitles} 条）\n`);
+if (unreadable.length) process.stderr.write(`[archive-merge] 读不出：${unreadable.join('、')}\n`);
+if (missing.length) process.stderr.write(`[archive-merge] 完全无条目：${missing.join('、')}\n`);
 
 if (args.digest) {
-  const lines = [`# 归档合并 ${payload.window.from} ~ ${payload.window.to}（${present.length}/${days} 天，${all.length} 条）`];
-  if (missing.length) lines.push(`\n⚠️ 缺档：${missing.join('、')} —— 这些天没有快照，报告里要写明，不要用别天顶替。`);
+  const lines = [`# 归档合并 ${payload.window.from} ~ ${payload.window.to}（${snapshots.length} 份快照，${all.length} 条）`];
+  if (missing.length) lines.push(`\n⚠️ 无覆盖：${missing.join('、')} —— 快照也补不到，报告里要写明，不要用别天顶替。`);
   for (const d of want) {
-    const list = byDay[d] ?? [];
+    const list = byDay[d];
     if (!list.length) { lines.push(`\n## ${d}（0）\n无条目`); continue; }
     lines.push(`\n## ${d}（${list.length} → 取前 ${Math.min(max, list.length)}）`);
-    for (const it of list.slice(0, max)) lines.push(`${(it.at ?? '').slice(0, 16)}｜${cut(it.title)}｜${it.url}`);
+    for (const it of list.slice(0, max)) lines.push(`${String(it.at ?? '').slice(0, 16)}｜${cut(it.title)}｜${it.url}`);
   }
   process.stdout.write(lines.join('\n') + '\n');
   process.exit(0);

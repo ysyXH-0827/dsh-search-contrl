@@ -289,9 +289,20 @@ if (archiveDir) {
   fs.mkdirSync(archiveDir, { recursive: true });
   const day = date; // 用采集目标日，而不是运行日：补跑历史窗口也能落到正确日期
   const file = `${archiveDir}/${day}.json`;
-  fs.writeFileSync(file, json);
+  // 存「本次抓到的全部条目」而不是只存当日窗口：即使某天没跑，后一天的快照也能覆盖前一天，
+  // archive-merge 据此补出缺失日期（RSS 一般保留最近 20-60 条，约 1-3 天）。
+  const seenAll = new Set();
+  const allItems = all.filter(it => (it?.url && !seenAll.has(it.url) ? (seenAll.add(it.url), true) : false));
+  const snapshot = JSON.stringify({
+    generatedAt: payload.generatedAt,
+    targetDate: day,
+    uniqueItems,          // 当日窗口内的条目
+    allItems,             // 本次抓到的全部条目：供未来补跑前几天的快照
+    stats: payload.stats,
+  }, null, 1);
+  fs.writeFileSync(file, snapshot);
   fs.appendFileSync(`${archiveDir}/index.log`, `${new Date().toISOString()} ${day} ${payload.stats.uniqueItems} 条 ${file}\n`);
-  process.stderr.write(`[daily-collect] 已归档 ${file}（${payload.stats.uniqueItems} 条）\n`);
+  process.stderr.write(`[daily-collect] 已归档 ${file}（快照含全部 ${uniqueItems.length} 条）\n`);
   // 定时任务场景：归档后不再往 stdout 喷整份 JSON（几十 KB），有 --out 时才输出
   if (!outFile) process.exit(0);
 }
