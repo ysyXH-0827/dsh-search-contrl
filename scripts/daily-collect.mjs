@@ -1,18 +1,21 @@
 #!/usr/bin/env node
-// daily-collect.mjs — 日报「采集阶段」脚本：并发拉取科技/汽车/AI 的公开 RSS，按板块归类、按日期过滤，输出候选清单。
-// 目的：把日报从「多轮模型往返 + 逐条抓取」压成「1 次脚本（约 1–2 秒）+ 1 次整理」。
+// daily-collect.mjs — 采集阶段脚本：按主题取源、并发抓取、按板块归类、按日期过滤，输出候选清单。
+// 3.0.0 起不再默认检索科技：没有主题就没有内置源，只剩检索种子（或调用方自己指定站点）。
 // 用法：
-//   node scripts/daily-collect.mjs                          # 今日，14 个 RSS 源，约 1–2 秒
+//   node scripts/daily-collect.mjs --presets                     # 列出内置主题（各自的源 / 板块 / 检索词）
+//   node scripts/daily-collect.mjs --topic=汽车 --days=7         # 临时换主题，不改设置
+//   node scripts/daily-collect.mjs                               # 用设置里第一个启用的主题，采集今日
 //   node scripts/daily-collect.mjs --date=2026-10-24 --days=3
 //   node scripts/daily-collect.mjs --max=10 --out=reports/_data/daily-2026-10-24.json
-//   node scripts/daily-collect.mjs --bing="固态电池 量产|光刻机"   # 额外补 Bing 免费 RSS 关键词检索
-//   node scripts/daily-collect.mjs --days=7                   # 默认输出紧凑摘要（每板块 3–6 行，省 ~90% token）
-//   node scripts/daily-collect.mjs --days=7 --json            # 需要整份 JSON 时显式要求（约 86KB，慎用）
-//   node scripts/daily-collect.mjs --concurrency=5 --total-timeout=45000   # 有界并发 / 总时长看门狗（默认 5 源 / 45 秒）
-//   node scripts/daily-collect.mjs --refresh --cache-ttl=0    # 绕过来源缓存（默认 10 分钟内命中缓存，重跑不压源）
-// 输出：默认纯文本摘要；--json 输出 JSON {date, window, feeds{ok[],fail[]}, boards{板块:[...]}, others[], stats}
+//   node scripts/daily-collect.mjs --bing="固态电池 量产|光刻机"  # 额外补 Bing 免费 RSS 关键词检索
+//   node scripts/daily-collect.mjs --days=7 --json               # 要整份 JSON 才加 --json（默认紧凑摘要）
+//   node scripts/daily-collect.mjs --concurrency=5 --total-timeout=45000   # 有界并发 / 总时长看门狗
+//   node scripts/daily-collect.mjs --refresh --cache-ttl=0       # 绕过来源缓存（默认 10 分钟命中）
+// 输出：默认纯文本摘要；--json 输出 JSON {title, topic, window, feeds{ok[],fail[]}, boards, others, stats}
 
 import fs from 'node:fs';
+import { renderTitle } from '../lib/report-title.js';
+import { boardsForPreset, feedsForPreset, listTopicPresets, presetForTopic } from '../lib/topic-presets.js';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map(a => {
@@ -33,17 +36,25 @@ const SCALE_POLICY = {
   medium: { maxPerBoard: 10, reportItems: '12–16', note: '大事件 + 中等事件，预告/泄露带状态标注' },
   small: { maxPerBoard: 14, reportItems: '16–24', note: '连产品小更新与行业小动态一起收' },
 };
-function readEventScale() {
-  const fromArg = String(args.scale ?? '').toLowerCase();
-  if (SCALE_POLICY[fromArg]) return fromArg;
+// ── 设置：事件程度 / 报告标题 / 主题都来自设置文件（--scale / --topic 可临时覆盖）──
+// 读不到设置不算失败：脚本要能独立跑（在任意目录做一次性采集），这时按「没有主题」处理。
+function readSettings() {
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  const file = `${home}/.dsh/plugin-data/dsh-search-contrl/settings.json`;
   try {
-    const home = process.env.USERPROFILE ?? process.env.HOME ?? '';
-    const raw = JSON.parse(fs.readFileSync(`${home}/.dsh/plugin-data/dsh-search-contrl/settings.json`, 'utf8'));
-    if (typeof raw?.eventScale === 'string' && SCALE_POLICY[raw.eventScale]) return raw.eventScale;
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    return typeof raw === "object" && raw !== null ? raw : {};
   } catch {
-    // 设置文件不存在或损坏时退回默认档，采集本身不能因此失败。
+    return {};
   }
-  return 'medium';
+}
+const settings = readSettings();
+
+function readEventScale() {
+  const fromArg = String(args.scale ?? "").toLowerCase();
+  if (SCALE_POLICY[fromArg]) return fromArg;
+  if (typeof settings.eventScale === "string" && SCALE_POLICY[settings.eventScale]) return settings.eventScale;
+  return "medium";
 }
 const scale = readEventScale();
 const policy = SCALE_POLICY[scale];
@@ -76,42 +87,31 @@ function cacheWrite(key, items) {
   } catch { /* 缓存写不进不能影响采集 */ }
 }
 
-// ── 源 ────────────────────────────────────────────────────────────────
-// 只收录实测可用的公开 RSS（2026-10-24 逐个校验过 item 数）：
-// ithome 60 / 36kr 27 / geekpark 24 / infoq 20 / leiphone 20 / electrek 81 / insideevs 19 / ifanr 20 / solidot 20 /
-// techcrunch 20 / ars 20 / tmtpost 19 / 36kr 27 / infoq 20 / verge 10 / sspai 10
-const FEEDS = [
-  { id: 'ithome', url: 'https://www.ithome.com/rss/', lang: 'zh', note: 'IT之家：手机/芯片/AI 综合' },
-  { id: 'leiphone', url: 'https://www.leiphone.com/feed', lang: 'zh', note: '雷锋网：AI/产业/车企' },
-  { id: 'ifanr', url: 'https://www.ifanr.com/feed', lang: 'zh', note: '爱范儿：手机/汽车/早报' },
-  { id: 'tmtpost', url: 'https://www.tmtpost.com/rss', lang: 'zh', note: '钛媒体：产业/科技商业' },
-  { id: '36kr', url: 'https://www.36kr.com/feed', lang: 'zh', note: '36氪：商业/创投/AI 应用' },
-  { id: 'infoq', url: 'https://www.infoq.cn/feed', lang: 'zh', note: 'InfoQ 中国：开发/AI 工程/架构' },
-  { id: 'solidot', url: 'https://www.solidot.org/index.rss', lang: 'zh', note: 'Solidot：科学/安全/开源' },
-  { id: 'sspai', url: 'https://sspai.com/feed', lang: 'zh', note: '少数派：软件/效率' },
-  { id: 'geekpark', url: 'https://www.geekpark.net/rss', lang: 'zh', note: '极客公园：科技产业/访谈' },
-  { id: 'verge', url: 'https://www.theverge.com/rss/index.xml', lang: 'en', note: 'The Verge：科技综合' },
-  { id: 'techcrunch', url: 'https://techcrunch.com/feed/', lang: 'en', note: 'TechCrunch：AI/创业' },
-  { id: 'ars', url: 'https://feeds.arstechnica.com/arstechnica/index', lang: 'en', note: 'Ars Technica：科学/航天/安全' },
-  { id: 'electrek', url: 'https://electrek.co/feed/', lang: 'en', note: 'Electrek：电动车/国际车型' },
-  { id: 'insideevs', url: 'https://insideevs.com/feed/', lang: 'en', note: 'InsideEVs：国际车型' },
-];
+// ── 主题 → 源：3.0.0 起没有「默认科技」────────────────────────────────
+// 主题来自设置里的 topics（第一个启用的），或 --topic= 临时指定。
+// 命中 lib/topic-presets.js 的预设时，用预设的 RSS + 板块规则 + 检索词；
+// 没命中就诚实降级：没有 RSS、没有板块，只有检索种子（或调用方自己挑站点）。
+function topicFromArgs() {
+  if (!args.topic) return null;
+  const label = String(args.topic).trim();
+  if (label === "") return null;
+  return { label, keywords: label.split(/[|,，、]/).map(s => s.trim()).filter(Boolean), domains: [] };
+}
+const configuredTopics = Array.isArray(settings.topics) ? settings.topics : [];
+const topic = topicFromArgs() ?? configuredTopics.find(t => t && t.enabled !== false && typeof t.label === "string" && t.label.trim() !== "") ?? null;
+const preset = presetForTopic(topic);
+const FEEDS = feedsForPreset(preset);
+const BOARD_RULES = boardsForPreset(preset);
 
-// ── 板块关键词（命中即归类，可多归；越靠前越优先，避免「研究」「标准」这类泛词误收） ──
-// 板块判定：**按顺序取第一个命中的板块**（避免一条新闻同时占 2–3 个板块、把 digest 撑大）。
-// 顺序即优先级：先具体产品线（车/手机），再芯片，再 AI，最后通用政策。
-const BOARD_RULES = {
-  '国内车型': [/比亚迪|蔚来|小鹏|理想汽车|问界|鸿蒙智行|极氪|零跑|小米汽车|长城汽车|吉利|奇瑞|上汽|广汽|智界|享界|尊界|阿维塔|岚图|哪吒|腾势|方程豹|魏牌|坦克|捷途|五菱|新车发布|交付量|智驾/i],
-  '国内手机': [/华为|小米|荣耀|OPPO|vivo|魅族|一加|真我|努比亚|红米|REDMI|鸿蒙|HarmonyOS|折叠屏|新机|国行|Mate|Pura|nova/i],
-  '芯片半导体': [/芯片|半导体|台积电|TSMC|英伟达|NVIDIA|AMD|Intel|英特尔|光刻|晶圆|HBM|存储芯|3nm|2nm|ASML|高通|联发科|骁龙|天玑|晶圆厂/i],
-  '国内 AI': [/大模型|模型发布|开源模型|DeepSeek|智谱|月之暗面|Kimi|通义|豆包|混元|文心|讯飞|MiniMax|阶跃|商汤|Qwen|GLM|百度世界|阿里云|火山引擎/i],
-  '国际 AI': [/OpenAI|ChatGPT|Anthropic|Claude|Gemini|DeepMind|Meta AI|Llama|xAI|Grok|Mistral|Copilot|Hugging Face/i],
-  '国际车型': [/Tesla|特斯拉|Toyota|BMW|Mercedes|Porsche|Rivian|Lucid|Waymo|Electric Vehicle|Cybertruck|FSD|Hyundai|Ford|GM\b|Volkswagen|BYD overseas/i],
-  '航天与科学': [/航天|火箭|卫星|NASA|SpaceX|星舰|登月|探测器|望远镜|量子计算|核聚变|太空|运载|遥感|空间站|嫦娥|天问|论文|Nature\b|Science\b/i],
-  '网络安全': [/漏洞|CVE-|勒索|数据泄露|黑客|零日|DDoS|APT攻击|安全公告|网络攻击/i],
-  // 政策板块只收真正的监管动作：去掉「国补」这类会命中产品促销的泛词
-  '产业政策': [/政策|监管|备案|工信部|网信办|反垄断|关税|法规|白皮书|国家标准|行业标准|征求意见稿|试点|补贴政策/i],
-};
+// --presets：列出内置主题，技能正文据此判断「这个主题有没有现成的源」，不必猜。
+if (args.presets) {
+  const rows = listTopicPresets().map(p => `- ${p.id}｜${p.label}｜RSS ${p.feeds.length} 个｜板块 ${Object.keys(p.boards).length} 个｜检索词 ${p.queries.length} 条`);
+  const head = topic
+    ? `当前主题：${topic.label}（预设 ${preset ? preset.id : "无"}）`
+    : "当前主题：无 —— 先让用户给出主题，或用 --topic= 指定";
+  process.stdout.write([head, ...rows].join("\n") + "\n");
+  process.exit(0);
+}
 
 function decodeEntities(s) {
   return String(s ?? '')
@@ -170,6 +170,23 @@ async function fetchFeed(feed) {
   } finally { clearTimeout(timer); }
 }
 
+// A Bing RSS row is a search hit, not an article: homepages and portal index pages
+// come back for nearly every query ("智谱清言", "新闻中心首页_新浪网",
+// "https://m.autohome.com.cn/"). Left alone they pad a board with links that carry
+// no news, which is worse than an empty board because it looks like coverage.
+function isIndexLike(hit) {
+  let parsed;
+  try {
+    parsed = new URL(hit.url);
+  } catch {
+    return true;
+  }
+  if (parsed.pathname === '' || parsed.pathname === '/' || parsed.pathname === '/index.html') return true;
+  const params = parsed.search.toLowerCase();
+  if (params.includes('redirect=') || params.includes('url=http')) return true;
+  return /(首页|_新浪网|官方网站|官网|-s*汽车报价.*资讯)$/.test(hit.title);
+}
+
 async function bingRss(query) {
   const q = encodeURIComponent(`${query} ${date}`);
   const url = `https://www.bing.com/search?q=${q}&format=rss&mkt=zh-CN&setlang=zh-CN`;
@@ -178,11 +195,14 @@ async function bingRss(query) {
   try {
     const r = await fetch(url, { headers: { 'user-agent': UA, 'accept-language': 'zh-CN,zh;q=0.9' }, signal: ctrl.signal, redirect: 'follow' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return parseFeed(await r.text()).map(i => ({
+    const raw = parseFeed(await r.text()).map(i => ({
       title: i.title, url: i.url, desc: i.desc,
       source: (() => { try { return new URL(i.url).hostname.replace(/^www\./, ''); } catch { return ''; } })(),
       at: toBeijingTime(i.atRaw),
     }));
+    const kept = raw.filter(item => !isIndexLike(item));
+    if (kept.length < raw.length) skippedIndex += raw.length - kept.length;
+    return kept;
   } finally { clearTimeout(timer); }
 }
 
@@ -192,6 +212,8 @@ const okFeeds = [];
 const all = [];
 let cacheHits = 0;
 let staleHits = 0;
+// Bing 通道丢掉的门户页数量：报进摘要，避免用户以为检索没结果
+let skippedIndex = 0;
 
 // 有界并发：14 个源一次性全发会同时压两端 socket，也是 undici 断言崩溃的诱因之一（LESSONS 规则 #7）。
 async function mapLimit(list, limit, fn) {
@@ -235,12 +257,24 @@ const jobs = [mapLimit(FEEDS, CONCURRENCY, async feed => {
   }
 })];
 
-const bingQueries = args.bing ? String(args.bing).split('|').map(s => s.trim()).filter(Boolean) : [];
+// 检索种子：显式 --bing 优先；否则用主题预设的检索词；再否则用主题关键词本身。
+const seedQueries = args.bing
+  ? String(args.bing).split("|").map(s => s.trim()).filter(Boolean)
+  : (preset && preset.queries.length ? preset.queries.slice() : (topic && topic.keywords ? topic.keywords.map(k => `${topic.label} ${k}`.trim()) : []));
+const bingQueries = [...new Set(seedQueries)].slice(0, 8);
 const bingJobs = bingQueries.map(async q => {
   const key = `bing-${q}`;
   const push = items => { for (const it of items) all.push({ ...it, atRaw: it.at, title: it.title }); };
   const hit = cacheRead(key);
-  if (hit && Date.now() - hit.at <= CACHE_TTL_MS) { cacheHits += 1; push(hit.items); return; }
+  if (hit && Date.now() - hit.at <= CACHE_TTL_MS) {
+    cacheHits += 1;
+    // A cache written before the index-page filter existed still holds portal rows;
+    // filtering on read makes an old cache behave like a fresh fetch.
+    const kept = hit.items.filter(item => !isIndexLike(item));
+    if (kept.length < hit.items.length) skippedIndex += hit.items.length - kept.length;
+    push(kept);
+    return;
+  }
   try {
     const items = await bingRss(q);
     cacheWrite(key, items);
@@ -343,10 +377,16 @@ if (watchlist.length) {
   watchlistHits.sort(byAt);
 }
 
+// 报告标题：模板来自设置（{主题}/{类型}/{日期}），渲染规则与技能正文、archive-digest 共用一份实现。
+const title = renderTitle(settings.reportTitle, { topic: topic ? topic.label : "", date, days });
+
 const payload = {
   generatedAt: new Date().toISOString(),
   date,
   scale,
+  title,
+  topic: topic ? { label: topic.label, preset: preset ? preset.id : null, keywords: topic.keywords ?? [] } : null,
+  feedsPlanned: FEEDS.length,
   scalePolicy: policy,
   window: { days, from: from.toISOString(), to: to.toISOString() },
   feeds: { ok: okFeeds, fail: errors },
@@ -387,6 +427,10 @@ if (archiveDir) {
   const snapshot = JSON.stringify({
     generatedAt: payload.generatedAt,
     targetDate: day,
+    // 主题与标题一并存进快照：archive-digest 脱离设置也能还原同一份标题与板块
+    title,
+    topic: payload.topic,
+    scale,
     uniqueItems,          // 当日窗口内的条目
     allItems,             // 本次抓到的全部条目：供未来补跑前几天的快照
     stats: payload.stats,
@@ -444,7 +488,11 @@ if (!args.json) {
   const capDefault = Number(args.days ?? 1) > 1 ? 6 : 3;
   const cap = Math.max(1, Number(args['digest-max'] ?? capDefault));
   const lines = [];
-  lines.push(`# 候选 ${windowed.length} 条 / ${okFeeds.length} 源 / ${payload.stats.elapsedMs}ms / 窗口 ${from.toISOString().slice(0,10)}~${to.toISOString().slice(0,10)} / 事件程度 ${scale}（每板块最多 ${cap} 行）`);
+  if (!FEEDS.length) {
+    lines.push(`# 注意：主题「${topic ? topic.label : "未指定"}」没有内置 RSS，候选只来自检索种子${bingQueries.length ? `（${bingQueries.length} 条）` : "（本次 0 条）"} —— 需要联网检索补齐。`);
+  }
+  const filtered = skippedIndex > 0 ? ` / 检索结果已过滤门户页 ${skippedIndex} 条` : "";
+  lines.push(`# ${title}｜候选 ${windowed.length} 条 / ${okFeeds.length} 源 / ${payload.stats.elapsedMs}ms / 窗口 ${from.toISOString().slice(0, 10)}~${to.toISOString().slice(0, 10)} / 事件程度 ${scale}（每板块最多 ${cap} 行）${filtered}`);
   for (const [board, items] of Object.entries(boards)) {
     lines.push(`\n## ${board}（${items.length} → 取前 ${Math.min(cap, items.length)}）`);
     for (const it of items.slice(0, cap)) lines.push(`${(it.at ?? '').slice(0, 16)}｜${cut(it.title)}｜${it.url}`);

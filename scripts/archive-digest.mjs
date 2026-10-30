@@ -14,6 +14,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { renderTitle } from '../lib/report-title.js';
+import { boardsForPreset, feedsForPreset, presetForTopic } from '../lib/topic-presets.js';
 const args = Object.fromEntries(
   process.argv.slice(2).map(a => {
     const m = /^--([^=]+)(?:=(.*))?$/.exec(a);
@@ -41,17 +43,29 @@ const items = (Array.isArray(data.allItems) && data.allItems.length)
     ? data.uniqueItems
     : (Array.isArray(data.items) ? data.items : []);
 
-const BOARD_RULES = [
-  ['国内 AI', /(月之暗面|Kimi|DeepSeek|百度|阿里|通义|千问|字节|豆包|腾讯|混元|智谱|MiniMax|商汤|科大讯飞|文心|阶跃|零一万物|百川|面壁|智元|宇树|模型|大模型|智能体|AIGC)/i],
-  ['国际 AI', /(OpenAI|ChatGPT|GPT-|Anthropic|Claude|Gemini|Google|Meta|Llama|Mistral|xAI|Grok|Copilot|Perplexity|Nvidia\s+AI|Hugging Face|LLM)/i],
-  ['芯片半导体', /(芯片|半导体|晶圆|台积电|TSMC|英特尔|Intel|AMD|英伟达|NVIDIA|高通|联发科|三星|SK\s*海力士|美光|ASML|光刻|封装|DRAM|NAND|HBM|麒麟|玄戒|RISC-V|ARM)/i],
-  ['国内手机', /(华为|小米|荣耀|OPPO|vivo|一加|realme|Redmi|iQOO|魅族|折叠屏|Mate\s*\d|Pura|iPhone|苹果|手机|平板|耳机|手表|鸿蒙|HarmonyOS)/i],
-  ['国内车型', /(比亚迪|小米汽车|蔚来|小鹏|理想|问界|智界|享界|尊界|极氪|零跑|哪吒|岚图|阿维塔|埃安|腾势|长城|吉利|奇瑞|长安|上汽|广汽|宁德时代|电池|充电|智驾|新能源车)/i],
-  ['国际车型', /(Tesla|特斯拉|Rivian|Lucid|Ford|GM|通用|Toyota|丰田|VW|Volkswagen|大众|BMW|宝马|Mercedes|奔驰|Hyundai|现代|Kia|起亚|Stellantis|Cybertruck|FSD|EV|electric vehicle|battery)/i],
-  ['航天与科学', /(NASA|SpaceX|星舰|火箭|卫星|探测器|望远镜|航天|登月|空间站|嫦娥|天问|量子|核聚变|超导|Nature|Science|论文|火星|月球|发射)/i],
-  ['网络安全', /(漏洞|CVE|勒索|黑客|攻击|数据泄露|安全|木马|钓鱼|越权|0day|补丁)/i],
-  ['产业政策', /(政策|监管|备案|工信部|网信办|反垄断|关税|法规|白皮书|国家标准|行业标准|国补|补贴)/i],
-];
+// 主题与标题：优先用快照自带的主题（daily-collect 会写进 data.topic），其次设置里的第一个主题。
+// 3.0.0 起不再有「科技」默认：主题未知时没有板块，只剩未归类清单。
+function readSettings() {
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  const file = `${home}/.dsh/plugin-data/dsh-search-contrl/settings.json`;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    return typeof raw === "object" && raw !== null ? raw : {};
+  } catch {
+    return {};
+  }
+}
+const settings = readSettings();
+const configuredTopics = Array.isArray(settings.topics) ? settings.topics : [];
+const snapshotTopic = data.topic && typeof data.topic.label === "string" ? data.topic : null;
+const argTopic = typeof args.topic === "string" && args.topic.trim() !== "" ? { label: args.topic.trim(), keywords: [], domains: [] } : null;
+const topic = argTopic ?? snapshotTopic ?? configuredTopics.find(t => t && t.enabled !== false && typeof t.label === "string" && t.label.trim() !== "") ?? null;
+const preset = presetForTopic(topic);
+const feeds = feedsForPreset(preset);
+const days = Number(data.window && data.window.days) || 1;
+const title = renderTitle(settings.reportTitle, { topic: topic ? topic.label : "", date, days });
+// 板块判定：按预设顺序取第一个命中（一条新闻只占一个板块，避免撑大 digest）
+const BOARD_RULES = Object.entries(boardsForPreset(preset));
 
 const cut = s => String(s ?? '').replace(/\s+/g, ' ').trim();
 
@@ -75,18 +89,19 @@ const buckets = new Map(BOARD_RULES.map(([name]) => [name, []]));
 const others = [];
 for (const it of uniq) {
   const hay = `${it.title ?? ''} ${it.desc ?? ''}`;
-  const hit = BOARD_RULES.find(([, re]) => re.test(hay));
+  const hit = BOARD_RULES.find(([, res]) => res.some(re => re.test(hay)));
   if (hit) buckets.get(hit[0]).push(it);
   else others.push(it);
 }
 
 const lines = [];
 const win = data.window && typeof data.window === 'object' ? data.window : null;
-lines.push(`# ${win ? '科技周报素材｜' + win.from + ' ~ ' + win.to : '科技日报素材｜' + date}${windowMode === 'all' ? `（全部 ${uniq.length} 条）` : ''}`, '');
+lines.push(`# ${title}${windowMode === "all" ? `（全部 ${uniq.length} 条）` : ""}`, "");
 lines.push(`> 脚本自动生成，未经过人工/模型筛选：按关键词归类，仅供快速浏览与后续成稿。共 ${uniq.length} 条。`, '');
 lines.push(`- 快照时间：${data.generatedAt ?? '未知'}`);
 lines.push(`- 快照文件：\`${path.basename(file)}\``);
-lines.push(`- 源：14 个 RSS（见 README）`);
+lines.push(`- 主题：${topic ? topic.label : "未指定"}${preset ? `（预设 ${preset.id}）` : ""}`);
+lines.push(`- 源：${feeds.length ? `${feeds.length} 个 RSS（${preset.label}）` : "无内置 RSS，本次靠检索补齐"}`);
 lines.push('');
 
 let shown = 0;

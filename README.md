@@ -1,85 +1,51 @@
-# dsh-search-contrl
+# DSH-Search-Contrl
 
-一个 DSH 插件，为 [DSH (DeepSeek Harness)](https://github.com/) 注册「DSH-Search-Contrl」技能：检索并生成中文日报、指定日期范围的日报，或一周科技新闻总结。
+**给 DeepSeek Harness 用的「主题搜索 + 中文报告」技能/插件。3.0 起不再默认科技：先问你要什么主题，再挑对应的源和板块。**
 
-仓库：<https://github.com/ysyXH-0827/dsh-search-contrl> · 设置入口：DSH 设置 → 侧边栏「搜索控制」
+`3.0.0-beta.1` · 需要 DSH `>= 0.2.0` · Node.js `>= 20` · MIT
 
+---
 
-## 登录 Cookie（设置 → 搜索控制 → 登录 Cookie）
+## 它是什么
 
-平台 API（例如 B站空间、AI 视频总结）需要登录态才回答，搜索引擎只能看到收录页。这个页签把「登录」这一步做成三步点击，不需要复制粘贴 Cookie：
+DSH-Search-Contrl 是一个装进 DSH 的**技能（skill）+ 设置页插件**。装上之后，你跟 DSH 说「发日报」「这周 AI 圈发生了什么」「盯一下这几个博主的更新」，它会：
 
-| 步骤 | 动作 | 背后发生什么 |
-|---|---|---|
-| 1 | 点「获取 Cookie」 | Host 用**独立临时 profile** 启动 Chrome/Edge，打开该站登录页（不碰你日常浏览器数据） |
-| 2 | 你在窗口里正常登录 | Host 每 1.5 秒通过 DevTools 协议读一次 Cookie |
-| 3 | 检测到登录 Cookie 即关窗 | 只保留证明登录态的那几项，写入本机 `cookies.json`，并删除临时 profile |
+1. **先读设置**（主题、标题模板、输出方式、字数、博主、Cookie 状态）；
+2. **确认主题**——设置里没有主题时，它不会自作主张选科技，而是先反问你；
+3. **按主题选源**：内置 10 个主题预设（科技 / 财经 / 汽车 / 体育 / 娱乐 / 医疗健康 / 游戏 / 时政政策 / 能源 / 科学），每个预设带检索词种子、可信站点域名、RSS 源和报告板块正则；没命中的主题它会自己找站点，并在报告里说明；
+4. **采集 + 校验 + 排版**，输出中文报告（表格或分条），带上博主最新动态、链接校验结果和条数统计。
 
-安全边界：
+设置页在 **设置 → 搜索控制**，所有选项都即时保存、可回退。
 
-- Cookie 值**永不回传页面**，设置页只显示名字、数量和保存时间（`前2***后2` 掩码）。
-- 文件权限 `0600`，位置 `~/.dsh/plugin-data/dsh-search-contrl/cookies.json`。
-- 单次捕获最长 5 分钟，超时自动关窗且不写入任何东西；同时只允许一个捕获会话（第二次会返回 `busy`）。
-- 找不到浏览器时明确提示，不会静默失败。
+## 为什么值得装
 
-支持站点：B站 `SESSDATA`、知乎 `z_c0`、微博 `SUB`、小红书 `web_session`、抖音 `sessionid`、X `auth_token`、YouTube `SID+SAPISID+LOGIN_INFO`、GitHub `user_session`。
+| 优点 | 具体表现 |
+| --- | --- |
+| **不预设主题** | 2.x 抓的天天是科技 RSS；3.0 的默认路径是「问主题 → 按主题选源」。你搜足球就只出足球。 |
+| **标题你说了算** | 报告标题是模板 `{主题}{类型}｜{日期}`，可改成 `{日期} · {主题}晚报` 之类；设置页有实时预览。 |
+| **源是挑过的，不是堆的** | 14 条 RSS 都实测过条目数（IT之家 60 / Electrek 81 / 极客公园 29 …），按主题分配，未知主题不硬凑。 |
+| **采集快，且可复跑** | 有界并发（默认 5）+ 源缓存（10 分钟）。7 天窗 14 源实测：冷跑 2.66 s → 热跑 26–28 ms。 |
+| **不再白跑** | undici 的 `assert(!this.paused)` 断言会在 socket 回调里炸掉整个进程；进程级兜底 + 45 s 看门狗之后，实测连跑 12 次全部正常收尾，个别源超时会被降级记录而不是丢结果。 |
+| **审计不撒谎** | `--audit` 会按你要的窗口逐天列出条数，缺的 5 天就写「缺失」，而不是只看有数据的那几天报「✅ 覆盖正常」。 |
+| **设置页和官方一致** | 分区 + 行 + 开关 + 底部保存条，样式走 DSH 设计令牌（`--dsw-alias-*`），并保留历史版本回退。 |
+| **离线可测** | 6 套不联网的测试共 87 条断言（设置 / 预设 / 客户端 / Cookie / 博主 / 指标），`pnpm test` 一把过。 |
 
-Agent 侧：`search_contrl` 的 `blogger` 动作识别到 `space.bilibili.com/<mid>` 会**直接调 B站空间 API**（有 Cookie 时还能读平台 AI 总结），拿到真正的“最新视频”而不是搜索收录页；`action:'cookie'` 可列出/清除已存会话。
+## 三分钟上手
 
+```bash
+cd <你的 DSH profile 目录>
+pnpm add dsh-search-contrl
+```
 
-### 报告输出方式怎么工作
+重启 DSH → 打开 **设置 → 搜索控制** → 看到页面就装好了。然后直接对 DSH 说：
 
-`delivery.mode` 有三个取值，默认 `file`：
+> 发一份 AI 日报
 
-| 模式 | 行为 | 适用 |
-|---|---|---|
-| `file` | 写入 `reports/`，回复给路径与要点表 | 归档、发邮件、二次编辑 |
-| `chat` | 不写文件，整份正文发在对话里 | 手机上直接看，不想翻文件 |
-| `both` | 写文件 + 正文进对话 | 既要档案又要当场可读 |
+- 设置里**没有**主题：它会先问你「这次报告主题是什么？」并顺手问要不要存进设置；
+- 设置里**有**主题：它直接用第一个启用的主题开工；
+- 报告交付后，如果这个主题是临时说的，它会再问一次要不要加入设置，方便下次一句话直达。
 
-聊天模式的条目压成一行：`**标题**（日期/状态）— 核心事实；关键数据；来源链接`，板块标题保留、条数不少于文件版——不允许只回一句“已生成”。切换后下一份报告立即生效，不用重启。
-
-## 2.0.0 改名：从 tech-daily-report 到 DSH-Search-Contrl
-
-技能与插件正式更名为 **DSH-Search-Contrl**（设置侧边栏名仍是「搜索控制」）。老名字的对应关系：
-
-| 位置 | 2.0.0 之前 | 2.0.0 |
-|---|---|---|
-| npm 包 | `dsh-tech-daily-report` | `dsh-search-contrl` |
-| 技能名 | `tech-daily-report` | `dsh-search-contrl` |
-| 工具名 | `tech_daily_search` | `search_contrl` |
-| patch 行 id | `tech-daily-report` | `search-contrl` |
-| 设置分区 id | `tech-daily-report-search-control` | `search-contrl-settings` |
-| 桥前缀 | `/api/tech-daily-report-settings` | `/api/search-contrl-settings` |
-| 数据目录 | `~/.dsh/plugin-data/dsh-tech-daily-report` | `~/.dsh/plugin-data/dsh-search-contrl` |
-
-升级要做的六件事：
-
-| 能力 | 怎么填 | 落到检索/交付上的样子 |
-|---|---|---|
-| 报告输出方式 | 顶部三选一：只给文件 / 只在聊天中呈现 / 文件 + 聊天 | 存进 `settings.json` 的 `delivery.mode`；`chat` 不写文件、正文直接进对话，`both` 两者都做 |
-
-原有三件事：① profile `package.json` 的依赖键与 `dsh.profile.bundles` 改成 `dsh-search-contrl`；② `cordis.patch.yml` 的行 id 改成 `search-contrl`、name 改成 `dsh-search-contrl`；③ 重启 DSH。旧数据目录不会被自动迁移，需要保留配置就手工把 `settings.json` 与 `history/` 复制到新目录。
-
-输出覆盖六个固定板块，每个板块都要播报可核验的成就与关键指标：
-
-| 板块 | 覆盖范围 |
-|---|---|
-| 国内 AI | 百度、阿里、腾讯、字节、华为、DeepSeek、智谱、月之暗面、MiniMax 等 |
-| 国际 AI | OpenAI、Google、Anthropic、Meta、Microsoft、xAI、Nvidia、Amazon、Apple 等 |
-| 国内手机与消费电子 | 华为、小米、荣耀、OPPO、vivo、魅族、努比亚、真我、联想等 |
-| 国内车型 | 比亚迪、蔚来、小鹏、理想、鸿蒙智行、极氪、吉利、长城、奇瑞、上汽、广汽、零跑、小米汽车等 |
-| 国际车型 | Tesla、Toyota、Volkswagen、BMW、Mercedes-Benz、Porsche、Ferrari、Ford、GM、Hyundai、Rivian、Lucid、Waymo 等 |
-| 科技成就与纪录 | 跨板块汇总销量、交付、续航、性能、赛事成绩、论文成果与量产突破 |
-
-## 特性
-
-- **日期范围灵活** — 只说「来一份日报」出当天日报；给出起止日期则按区间整理；说「本周」按自然周周一至周日；说「最近 7 天」按连续 7 个自然日。
-- **成就播报有硬性口径** — 每条成就必须写明主体、指标、数值、单位、统计口径、时间范围和成就级别（世界/行业/公司/阶段性）。没有可靠数据时明确写「暂无已确认的新成就」，不允许用宣传口号替代，也不允许在口径不清时使用「全球第一」「创纪录」这类绝对表述。
-- **双通道搜索，默认免费** — 注册 `search_contrl`：默认走免费的 Bing RSS 通道（无需 Key，只返回摘要），配置 Tavily Key 后可切到付费通道拿到 AI 答案与正文提取；`provider: "auto"` 先免费、失败才回退。提取结果按 URL 缓存 24 小时，Tavily 额度超限时短暂熔断而不是继续扣费。
-- **渠道矩阵而非单一搜索** — 技能内置各板块的官方与监管渠道清单（品牌官网新品页、工信部新车申报公示与 3C 认证、GitHub/Hugging Face 模型卡、arXiv、NHTSA、FIA 等），并要求逐项尝试。
-- **「暂无」有判定门槛** — 只有在官网、监管备案、行业媒体三类渠道都无记录，且列出实际检查过的渠道清单与受限原因时，才允许写「暂无」。禁止把「我没查到」表述成「不存在」。
-- **团队采集有协议** — 跨板块、跨多日采集默认智能体团队并行：先造并发检索工具、一人一文件、任务自包含、Lead 复核、失败补位、列表页直连判定，并在每次采集后把踩坑写回技能并推送。
+---
 
 ## 安装
 
@@ -92,24 +58,47 @@ pnpm add dsh-search-contrl
 npm install dsh-search-contrl
 ```
 
-包名 `dsh-search-contrl`，直接装最新版即可，不需要记版本号：
-
 | 需求 | 命令 |
 | --- | --- |
 | 装最新版 | `pnpm add dsh-search-contrl` |
 | 升到最新版 | `pnpm add dsh-search-contrl@latest` |
+| 装 3.0 测试版 | `pnpm add dsh-search-contrl@3.0.0-beta.1` |
 | 看有哪些版本 | `npm view dsh-search-contrl versions` |
-| 锁定某一版 | `pnpm add dsh-search-contrl@2.1.6` |
+| 锁定某一版 | `pnpm add dsh-search-contrl@2.2.18` |
 
-发布走 GitHub Actions 的 OIDC trusted publishing，registry 上的 `latest` 永远指向最新一次成功发布——装完看一眼 `node_modules/dsh-search-contrl/package.json` 的 `version` 就知道拿到哪版。
+发布走 GitHub Actions 的 OIDC trusted publishing，registry 上的 `latest` 指向最新一次成功发布；`node_modules/dsh-search-contrl/package.json` 的 `version` 就是当前装到的版本。
 
-没有 npm 账号或想跳过 registry 时，直接从 GitHub tag 装，效果一样（tag 换成最新版本号即可）：
+> `3.0.0-beta.1` 是 **beta**：功能完整、测试全绿，但设置页形态和技能话术可能还会调整。想要稳定版请留在 `2.2.18`。
+
+### 方式二：从 git / tarball 安装
 
 ```bash
 pnpm add https://codeload.github.com/ysyXH-0827/dsh-search-contrl/tar.gz/refs/heads/main
 ```
 
-两种方式都必须同时在 profile 的 `package.json` 里登记到 bundles，否则插件不会被加载：
+或在 profile 的 `package.json` 里写：
+
+```json
+{ "dependencies": { "dsh-search-contrl": "github:ysyXH-0827/dsh-search-contrl" } }
+```
+
+### 方式三：本地目录（开发调试）
+
+把仓库放到 profile 目录**内部**，再链接：
+
+```json
+{ "dependencies": { "dsh-search-contrl": "link:./plugins/dsh-search-contrl" } }
+```
+
+```bash
+pnpm install
+```
+
+> 必须放在 profile 目录内部：插件依赖 `@deepseek-ai/schemastery`，Node 要从插件目录向上找到 profile 的 `node_modules`，否则 `ERR_MODULE_NOT_FOUND`。
+
+### 登记到 bundles
+
+不论哪种装法，都要让 profile 知道要加载它：
 
 ```json
 {
@@ -118,43 +107,7 @@ pnpm add https://codeload.github.com/ysyXH-0827/dsh-search-contrl/tar.gz/refs/he
 }
 ```
 
-> 依赖写 `"latest"` 时，每次 `pnpm install` 都可能拉到更新的版本；想稳定复现就写死版本号（如 `"^2.1.6"`）。升级后必须重启 DSH 才会加载新的客户端 bundle。
-
-`cordis.patch.yml` 随包安装（`files` 白名单包含它），插件的 `id: search-contrl` 和设置页文案都来自这份 patch。打包内容可用 `pnpm pack` 自查：正常只有 `lib/`（12 个文件）、`cordis.patch.yml`、`README.md`、`LICENSE`、`package.json`，约 79 KB。
-
-### 方式二：从 git 安装（等价写法）
-
-```json
-{
-  "dependencies": {
-    "dsh-search-contrl": "github:ysyXH-0827/dsh-search-contrl"
-  }
-}
-```
-
-### 方式三：本地目录（开发调试）
-
-把仓库放到你的 DSH profile 目录内，然后在 profile 的 `package.json` 里链接它：
-
-```json
-{
-  "dependencies": {
-    "dsh-search-contrl": "link:./plugins/dsh-search-contrl"
-  }
-}
-```
-
-安装依赖：
-
-```bash
-pnpm install
-```
-
-> **重要：** 请将插件放在 profile 目录**内部**（如上例的 `plugins/` 子目录）。插件依赖 `@deepseek-ai/schemastery`，Node 需要从插件目录向上查找 profile 的 `node_modules` 才能解析；放在 profile 树外会导致 `ERR_MODULE_NOT_FOUND`。
-
-### 启用插件
-
-插件自带 bundle patch，安装后会自动插入插件行。若需自定义配置，在你的 profile `cordis.patch.yml` 中加入：
+插件自带 `cordis.patch.yml`（`id: search-contrl`），安装后会自动插入插件行。要自定义 Host 侧配置，在 profile 的 `cordis.patch.yml` 里加：
 
 ```yaml
 - id: search-contrl
@@ -166,346 +119,227 @@ pnpm install
     timeoutMs: 45000
 ```
 
-修改配置后需**重启 profile** 才会生效。
+改完配置需**重启 profile**；只改设置页里的选项不需要重启。
 
-### 一次读多个博主
+### 升级 / 回退 / 卸载
 
-```json
-{ "action": "bloggers", "deep": true, "concurrency": 4 }
-```
+- 升级：`pnpm add dsh-search-contrl@latest` 后**重启 DSH**（客户端 bundle 是启动时注入的）。
+- 回退：`pnpm add dsh-search-contrl@2.2.18`；设置文档向前兼容，3.0 新加的 `reportTitle` 在 2.x 里会被忽略。
+- 卸载：从 `dependencies` 和 `dsh.profile.bundles` 移除，`pnpm install`，重启。设置在 `~/.dsh/plugin-data/dsh-search-contrl/`，需要的话手动删。
 
-一次调用并发读全部已保存博主（B站走签名空间 API、微博走 ajax 时间线），返回 `creators[]`，单个博主失败不影响其它。实测 2 个博主：串行 754 ms → 并发 462 ms。
+---
 
-### 检索太慢怎么办
+## 3.0 有什么不一样
 
-- 同一博主/视频在 **60 秒内重复问**会直接命中进程内缓存（列表 60 s、视频详情与 AI 总结 10 min、WBI 密钥 10 min），第二次通常是 1 ms 级。
-- 冷启动一次「博主最新视频 + AI 总结」约 0.8 s（4 个必要请求：`nav` → 签名列表 → 视频详情 → AI 总结），这是 B 站接口的下限，不是插件开销。
-- 走得慢还可能是在走回退链：签名接口被风控时才会 `sleep 1.2 s` 后回落未签名接口，再失败才回落到搜索引擎（3 条查询）。看返回里的 `apiFallback` 就知道卡在哪一环。
+| 变化 | 2.2.x | 3.0 |
+| --- | --- | --- |
+| 默认主题 | 科技（14 条科技/车 RSS 全量跑） | **无**：先问主题，再按预设选源 |
+| 报告标题 | 技能正文写死「标题必须带科技二字」 | 设置里的模板，占位符 `{主题}` `{类型}` `{日期}` |
+| 科技源 | 采集脚本里硬编码 | 移入「科技 / 汽车 / 科学」预设，选到才用 |
+| 设置页 | 7 个页签（tdr-tabs 风格） | 官方风格分区 + 行 + 底部保存条，新增「报告标题」分区 |
+| 主题表 | 无 | 10 个预设：别名正则、关键词、域名、检索词、RSS、板块 |
 
-### 输出方式保存后又变回「只给文件」
+升级注意：
 
-说明 DSH 进程里加载的还是 2.2.0 之前的服务端模块。**客户端 bundle 每次打开设置页都从磁盘读，服务端模块则缓存在进程里**，所以会出现“界面是新的、保存被旧的丢掉”的现象。
+1. 老设置文件不需要手工迁移，`reportTitle` 缺失会自动补默认模板。
+2. `topics` 为空时，第一次「发日报」会**先反问你**——这是 3.0 的设计，不是坏了。
+3. 之前写死的「科技」标题不再出现；想要科技报告就建一个「科技」主题（或直接说「AI 日报」，预设会匹配到科技）。
 
-- 现象确认：`~/.dsh/plugin-data/dsh-search-contrl/settings.json` 里没有 `delivery` 键，且设置页状态栏提示“被正在运行的旧版服务端丢弃了”。
-- 处理：**重启 DSH**，再打开「搜索控制」重新保存一次。2.2.1 起页面会在检测到旧服务端时提前给出提示，并保留你选中的值不清空。
+---
 
-## 配置项
+## 设置页逐项说明
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `tavilyApiKey` | string (secret) | `""` | Tavily API Key，可选。留空时检索走免费的 Bing 通道，只有正文提取不可用。 |
-| `searchProvider` | `auto` \| `bing` \| `tavily` | `auto` | 检索通道。`auto` 先用免费的 Bing，Bing 失败且配了 Key 才回退 Tavily；`bing`/`tavily` 为强制单通道。 |
-| `bingMarket` | string | `zh-CN` | Bing 免费通道的地区市场，例如 `zh-CN`、`en-US`。 |
-| `searchDepth` | `basic` \| `advanced` | `basic` | Tavily 检索深度。`basic` 每次约 1 credit，`advanced` 约 2 credits 且返回更丰富上下文。Bing 通道不受此项影响。 |
-| `maxResults` | number (1–20) | `8` | 每次检索返回的结果条数上限。 |
-| `timeoutMs` | number (5000–120000) | `45000` | 单次上游请求超时时间（毫秒）。 |
-| `historyLimit` | number (5–100) | `20` | 设置页最多保留多少个历史版本用于回退。每次保存、重置、回退都会先快照被替换的版本，超出上限的最旧快照会被删除。 |
+路径：**设置 → 搜索控制**。改完点底部的「保存」（有改动时按钮才可用），保存会同时写一份历史快照。
 
-### 获取 Tavily API Key（可选）
+### 1. 报告标题
 
-在 [tavily.com](https://www.tavily.com/) 注册，免费额度为每月 1000 credits，无需信用卡。一次完整日报约消耗 6 至 12 credits；`extract` 有 24 小时 URL 缓存、多主题可合并成一次 `batch`，重复采集同一批来源时的实际消耗会明显低于逐条检索。
+- **控件**：模板输入框 + 三个占位符按钮（点一下插到光标处）+ 实时预览。
+- **占位符**：`{主题}`、`{类型}`（按窗口自动判断：1 天日报、7 天内周报、更长月报）、`{日期}`。
+- **默认**：`{主题}{类型}｜{日期}` → 主题「AI」、当天 → `AI日报｜2026-10-30`；主题为空时自动去掉多余分隔符 → `日报｜2026-10-30`。
+- **上限**：120 字符；清空则回落到默认模板（不会只剩一个日期）。
+- **影响范围**：技能正文的标题行、`scripts/daily-collect.mjs` 的摘要与归档、`scripts/archive-digest.mjs` 的素材标题，全部用同一份模板。
 
-如果不想消耗额度，把 `searchProvider` 保持默认的 `auto`（或显式设为 `bing`）即可：检索走 Bing RSS，零成本，代价是只有摘要、没有 AI 答案，也不能用 `extract` 取正文。
+### 2. 报告输出方式
 
-> ⚠️ **切勿把真实 Key 提交到版本库。** 仓库的 `.gitignore` 已排除常见密钥文件，配置默认值为空字符串。
+- **交付方式**：
+  - 只给文件——把报告写进 `reports/`，聊天里只说路径；
+  - 只在聊天中呈现——不落盘，适合随手看一眼；
+  - 文件 + 聊天——两份都给（长报告推荐）。
+- **排版**：`表格`（默认，事件表 + 链接列）或 `分条`（每条一段，适合手机看）。
+- **事件密度**：`large` / `medium`（默认）/ `small`，对应每个板块最多 6 / 10 / 14 条。板块太多说明抓太宽，可以调小。
 
-## 搜索工具
+### 3. 主题
 
-无论是否配置 Key，插件都会注册 `search_contrl`；默认先用免费的 Bing 通道：
+每条主题有四个字段：
 
-**免费检索（Bing RSS，无需 Key）**
-
-```json
-{
-  "action": "search",
-  "query": "国产大模型 开源 发布",
-  "provider": "bing",
-  "include_domains": ["huggingface.co"]
-}
-```
-
-返回 `provider: "bing"` 与 `results` 数组，每项含 `url`、`title`、`content`（摘要）、`published_date`。已知边界：一页约 10 条、最多翻 3 页；`include_domains`/`exclude_domains` 会被翻译成 `site:`/`-site:` 运算符；Bing 会限速，批量并发默认压到 3。
-
-**付费检索（Tavily，需要 Key）**
-
-```json
-{
-  "action": "search",
-  "query": "国产大模型 开源 发布",
-  "provider": "tavily",
-  "include_domains": ["huggingface.co"]
-}
-```
-
-额外返回 `answer`（AI 摘要），结果项含 `score`。`provider: "auto"`（默认）先用 Bing，Bing 失败且配置了 Key 时才付费回退，返回里的 `provider` 字段始终说明这次实际是谁答的。
-
-**提取正文**
-
-```json
-{
-  "action": "extract",
-  "urls": ["https://github.com/QwenLM/BlenderWorld"]
-}
-```
-
-用于导航占满页面、正文被截断的情况。实测长页面（模型卡、仓库 README、厂商规格页）可提取数万字符量级，远多于普通抓取。**该动作只有 Tavily 通道，没有 Key 时直接报错**。
-
-**批量检索（多主题快路径）**
-
-```json
-{
-  "action": "batch",
-  "queries": [
-    { "query": "国产大模型 开源 发布", "label": "llm" },
-    { "query": "2026年10月17日 大模型 开源", "label": "cn-ai", "max_results": 5 }
-  ],
-  "snippet_chars": 400
-}
-```
-
-1 至 8 条 query 在一次调用内并发执行，返回 `{ ok, results: [{ label, ok, query, results, response_time }], succeeded, failed, elapsed_ms }`。单条失败不影响其余条目，失败项带 `ok: false` 与 `error`。实测同一批 6 组主题：串行发 6 次 `search` 用 17.1 秒，一次 `batch` 用 6.5 秒；同一 query 在 10 分钟内重复调用直接命中进程内缓存，返回 0 毫秒。
-
-**缓存与计费**
-
-- `extract` 的结果按 URL 缓存 24 小时。返回里的 `served_from_cache` 表示本次有几条来自缓存，`credits_estimated` 估算本次新消耗的 credit；页面确实更新过时才加 `refresh: true` 绕过缓存。
-- **缓存副本有截断上限**：写入缓存时会保留正文前 **24,000 字符**，超出部分以 `[content truncated when cached; ...]` 标记收尾。首次抓取返回的是完整正文，只有命中缓存时才会看到这个标记；确实需要尾部内容时用 `refresh: true` 重新抓取（会重新计费）。
-- `search` 每次请求 1 credit，`extract` 每 5 个成功 URL 1 credit。因此：不要在同一轮采集里重复抓同一 URL；`extract` 一次传满 20 个 URL 才划算；多主题检索合并成一次 `batch`，不要用连续小批次去「试探」。
-- 上游明确回报额度或频率超限时，插件短暂熔断并在返回体里给出 `credit_guard` 字段。此时应消费已有缓存或等 `retry_after_ms` 之后再试，不要重试轰炸，并把这一限制写进日报的检索说明。
-
-## 设置页 GUI（自定义检索）
-
-入口有两个，指向同一份配置：
-
-| 入口 | 位置 | 形态 |
-|---|---|---|
-| **搜索控制**（主入口） | **设置 → 侧边栏「搜索控制」** | 一级分区，点进去直接是四个页签 + 顶部「报告输出方式」（`settings.section` slot，order 152） |
-| 插件行配置 | 设置 → 插件 → DSH-Search-Contrl | 同一张卡片的折叠/展开形态（`plugins.row.config` slot） |
-
-六件事：
-
-| 能力 | 怎么填 | 落到检索/交付上的样子 |
-|---|---|---|
-| 报告输出方式 | 顶部三选一：只给文件 / 只在聊天中呈现 / 文件 + 聊天 | 存进 `settings.json` 的 `delivery.mode`；`chat` 不写文件、正文直接进对话，`both` 两者都做 |
-
-| 事件程度 | 「事件程度」页签三选一：大 / 中 / 小 | 存进 `settings.json` 的 `eventScale`；采集脚本据此限制每板块候选数，报告每条标注【大】/【中】/【小】 |
-| 报告格式 | 「报告格式」页签二选一：表格（默认）/ 分条 | 存进 `settings.json` 的 `reportFormat`；报告按它排版，默认每板块一张表 |
-| 博主动态原链接 | 「博主」页签底部的开关：显示 / 不显示 | 存进 `settings.json` 的 `showPostLinks`；关掉后报告里的博主动态只保留内容与转评赞数据、不附原文链接 |
-| 博主要点字数 | 「博主」页签的「要点字数」：微博 / B 站分别选 20 / 40 / 60 / 80 字挡位，或直接输入自定义值（10–200） | 存进 `settings.json` 的 `pointLength`（`{ weibo, bili }`）；脚本输出的 `pointLength` 就是报告里该平台要点字数的下限，默认微博 20、B 站 50 |
-| AI 总结（按平台） | 「博主」页签的「AI 总结」：B 站可开启 / 关闭，微博显示「平台无接口」 | 存进 `settings.json` 的 `aiSummary`（`{ weibo, bili }`）；B 站开启时脚本取平台 AI 总结并用缓存 + 串行节流，关闭时脚本不取、由模型读标签与简介写一句评论 |
-
-原有三件事：
-
-| 能力 | 怎么填 | 落到检索上的样子 |
-|---|---|---|
-| 自定义搜索源 | 加一条源，类型选 Bing / Tavily / 指定站点 | 通道型源固定 provider；站点型源转成 `include_domains` |
-| 自定义主题（不限科技） | 主题名 + 关键词，可选限定站点 | 无站点：一条「关键词 关键词」查询；有站点：每站点一条 `site:` 查询（最多 4 条） |
-| 博主定向检索 | 粘贴博主主页链接 | 解析出平台域名，发 `site:平台域名 UID/昵称`（最多 2 条） |
-
-支持解析的链接：B 站、微博、知乎、X / Twitter、YouTube、抖音、快手、小红书、GitHub、Medium、Substack、CSDN、掘金、少数派、公众号（`mp.weixin.qq.com`）。解析不了的主页链接在保存时会被拒绝，不会静默写入。
-
-**定向语义是本地保证的，不是靠 `site:`**：实测免费的 Bing RSS 通道对 `site:` 很不老实——`site:reuters.com AI chips` 返回过 CSDN、知乎的结果。所以域内结果的判定在本地做：只保留主机名等于目标域名或在其子域下的结果，并把只剩首页（如 `https://www.bilibili.com/`）的条目让位给真正的内容页。若换成「域名当普通关键词」后仍然一条都对不上，才会花 1 credit 走 Tavily 的 `include_domains`，返回里标 `domain_fallback: "tavily"`；没配 Tavily Key 时就是空结果加 `dropped_by_domain` 计数，**不会把站外噪声当定向结果交出去**。博主检索先查名称再查 UID——数字 UID 基本不被索引，名称通常能直接落到主页或作品页。
-
-**版本可回退**：每次保存、重置、回退都会先把**被替换的那一版**写进历史，再写新版本；所以回退本身也能再回退，不存在「点错一次就回不去」。默认保留 20 个版本，用 `historyLimit` 调整。
-
-**数据落在哪**：`~/.dsh/plugin-data/dsh-search-contrl/settings.json`，历史在同目录 `history/`。不写 profile 的 patch 文件——GUI 不该改写 Host 合成出来的配置层；自带存储才能保证每次写入都可回退。可用 `SEARCH_CONTRL_DATA_DIR` 改目录。
-
-**读写桥**：渲染进程通过 `/api/search-contrl-settings/{describe,save,rollback,reset,history,preview}` 访问 Host，全部 POST，只接受同源回环请求（跨站、非本机、非 POST 一律拒绝）。`preview` 只计算将发送的查询，不消耗 Tavily credit。
-
-**装完要重启**：客户端 bundle 由 Host 启动时扫描 `exports["./client"]` 加载，改完插件或升级版本后需**重启 DSH**，设置 → 侧边栏「搜索控制」才会出现（面板热更新只在 `pnpm run dev:web` 下生效）。
-
-**插件版本回退**：仓库打了 tag，`v1.5.2`（设置侧边栏「搜索控制」）、`v1.5.1`/`v1.5.0`（只有插件内配置页）与 `v1.4.4`（最后一个无 GUI 版本）。退回旧版用 `git fetch --tags && git checkout v1.4.4`，或把 profile 里的依赖版本写回 `1.4.4` 再重启。设置数据存在插件目录之外，回退插件版本**不会**丢配置。
-
-**Agent 侧用法**（不打开设置页也能用）：
-
-```json
-{ "action": "topic", "topicId": "t_xxx" }
-{ "action": "topic", "topic": "固态电池 量产", "domains": ["reuters.com"] }
-{ "action": "blogger", "url": "https://space.bilibili.com/123456", "label": "老石谈芯" }
-{ "action": "search", "query": "光刻机", "sourceId": "s_xxx" }
-{ "action": "history", "op": "list" }
-{ "action": "history", "op": "restore", "snapshot_id": "2026-10-23T13-21-49-123Z.json" }
-```
-
-不配置任何自定义项时，报告仍按固定六板块执行；配置了主题或博主，才追加对应检索。自定义内容同样受日期与来源纪律约束：先确认发布日期，再看内容，只用摘要不算核实。
-
-### 登录 Cookie 没反应怎么办
-- **报 `EPERM, Permission denied ...\Temp\dsh-search-contrl-*`**：这是清理临时浏览器配置目录偶发被 Edge 子进程占用，2.1.2 起会等浏览器真正退出并重试删除，失败也只提示“下次启动自动清理”，不会再让捕获失败。
-
-1. 确认 DSH 已**重启**：Cookie 捕获跑在 Host 进程里，只刷新页面不会加载新代码。
-2. 点「获取 Cookie」后应弹出一个**新的浏览器窗口**并停在登录页；登录成功后窗口自动关闭，列表里出现「已登录 · N 个 Cookie」。
-3. 若显示「读取 Cookie 失败：…」，那是浏览器协议层报错（例如某版本不支持某个 CDP 方法），把提示原文发出来即可定位。
-4. 维护者可用 `npm run smoke` 做真浏览器自检：它会开一个临时窗口、种一个测试 Cookie、再验证读取链路。
-
-## 自学习（月报收尾必做）
-
-每份月报交付后执行四步复盘：回顾目标 → 评估结果（条数/可达链接/覆盖日期）→ 分析原因 → 写规律。规则与失败库统一维护在 `docs/LESSONS.md`，可执行规则同步进技能；只写数字与命令，不写感想。
-
-## 输出两层：主事件 + 中等事件
-
-日报与月报固定两层：**第一层主事件**（每板块 3–5 条头条）+ **第二层中等事件**（每板块 2–4 条次一级）。中等事件必须标状态（预告/爆料/消息人士/企业测试口径），不得用促销与纯观点填充；候选先全量扫描再分层挑选。
-
-**来源多样性**：主事件尽量配两个独立来源（官方/监管/论文优先，独立媒体次之），只找到单一来源时标注“仅单一来源”，不把同一家媒体的多篇稿子当多源。
-
-**第二来源要先验出处**：打开候选页看它自己标注的来源；标注“来源：IT之家/快科技”或属于大风号/网易号/搜狐号/百家号等分发账号的稿件都是转载，不算独立来源；404/522 的候选直接剔除。
-
-## 性能基线（实测）
-
-| 环节 | 改造前 | 改造后 | 倍数 |
-| --- | --- | --- | --- |
-| 31 天归档扫描 | 串行 13.9 s | 并发 8：0.38 s（冷）/ 24 ms（热缓存） | 约 36× / 580× |
-| 6 条 Bing 查询 | 串行 1.41 s | 并发 4：0.60 s / 5 ms（热缓存） | 2.3× / 280× |
-| 7 天窗采集（14 源） | 冷跑 2.66 s | 源缓存热跑 26–28 ms（14 源全命中） | 约 95× |
-| 检索 / 提取缓存（跨进程） | 冷进程 2 次上游请求 | 热进程 0 次（磁盘 tier 命中） | 重复成本归零 |
-
-工具位置：`scripts/scan-archives.mjs`、`scripts/bing-search.mjs`；两者都带磁盘缓存，重复采集同一时段基本零成本。采集脚本的源缓存见 `scripts/.cache/feeds/`，检索缓存的磁盘层在 `~/.dsh/plugin-data/dsh-search-contrl/cache/`（`SEARCH_CONTRL_DATA_DIR` 可改向，`DSH_SEARCH_CONTRL_NO_DISK_CACHE=1` 整层关闭），Host 重启不再清零。
-## 使用建议
-
-厂商官网的规格页路径并不统一，猜错会拿到 404：规格页常见 `/spec` 与 `/specs` 两种写法，产品资讯多在 `/news/`，活动页在 `/activity/`，上市公告在 `/notice-*`。建议先用 `search` 配合 `include_domains` 定位正确链接，再用 `extract` 取回正文，不要靠猜路径。
-
-## 智能体团队采集
-
-跨板块、跨多日的采集默认交给智能体团队并行跑。技能内置的完整协议在 `lib/index.js` 的「智能体团队采集协议」一节，这里给出可执行要点：
-
-| 规则 | 含义 |
+| 字段 | 作用 |
 | --- | --- |
-| 先造工具再分活 | 用 `lib/bing.js` 封装并发 CLI，一次 1–8 条查询、并发上限 3，避免每个成员串行等网络 |
-| 一人一文件 | 每个成员只写自己的 `.md`，写域不重叠；`README.md` 由 Lead 独占 |
-| 任务自包含 | prompt 带齐窗口、口径、排除项、已知线索、交付格式、验收标准与回报要求 |
-| 给线索不给结论 | 明确标注“需核实线索，不是结论”，防止成员把假设写成事实 |
-| Lead 复核 | 成员回报后抽检日期、链接可达性与口径标注，错误结论由 Lead 亲自改 |
-| 失败不空转 | 成员中途失败时 Lead 直接补位写完板块，不等、不原样重派 |
-| 列表页直连 | 判断日归档/列表页是否为空必须直连抓取；提取通道可能只返回骨架 |
-| 写回并推送 | 每次团队采集后把踩坑与有效做法写回技能并提交推送，不做一次性动作 |
-| 成员模型选对 | 实测 deepseek-flash 成员连续 0 交付；换 gpt-5.4 后 3 个板块 2 个一次成功、1 个重跑成功 —— 连续空手要换模型，不要原样重派 |
-| 扫描脚本化 | 归档页 DD 补零逐日抓取、直连判定；不得用提取通道判空 |
-| 清单先落盘 | 候选清单写成文件再派活，成员只做核对与取舍 |
-| 批次时间预算 | 超预算即终止批次，Lead 用清单兜底，不把等待当进度 |
-| 成员任务预算 | 单成员 ≤12 次工具调用、≤8 分钟；超时或空手立即由 Lead 接手 |
-| 补采独立文件 | supp-*.md 并行补采，合并时按 URL 去重并重编号 |
+| 名称 | 报告标题里的 `{主题}`，也是匹配预设的第一依据 |
+| 预设 | 可手工指定（如「科技」），留「自动匹配」则按名称 → 关键词 → 域名依次猜 |
+| 关键词 | 检索词种子；多个主题时也用来判断用户这句话在说哪个主题 |
+| 域名 | 想只在这些站点里搜时填；不填就用预设的域名表 |
 
-实测参考：3 条查询并发执行 wall 1080 ms，而单条分别 566 / 422 / 441 ms，串行约 1429 ms；5 个板块并行采集一轮可产出 100+ 条明细。
+- 右侧开关控制是否参与「自动选择第一个主题」；关掉的主题仍可被点名使用。
+- 没配置任何主题时，页面会提示「报告先问主题再检索」——这正是 3.0 的默认行为。
+- 预设匹配不到时不会报错：技能会自选站点检索，并在报告的检索说明里写明用了哪些站点。
 
+### 4. 搜索源
 
-## 使用
+| 类型 | 说明 | 需要密钥 |
+| --- | --- | --- |
+| Bing 免费通道 | 默认可用，走 Bing 的 RSS 输出，条数有限 | 否 |
+| Tavily | 有 AI 摘要和更长的正文提取，`searchDepth` 可选 basic / advanced | 是（`tavilyApiKey`） |
+| 指定站点 | 把检索限制在某个域名内（等价于 `site:`），适合盯一家媒体或一个公告库 | 否 |
 
-安装并重启后，直接用自然语言触发：
+- 每条源可单独开关；关掉的源不会出现在检索计划里，但保留在文档中，随时开回来。
+- 「指定站点」只填域名即可（粘整条 URL 会被自动截成主机名）。
 
-- 「来一份日报」/「发日报」/「今日科技新闻」→ 当天日报
-- 「从 10 月 1 日到 10 月 7 日的日报」→ 指定区间
-- 「本周科技总结」/「最近 7 天科技新闻」→ 按周或最近 7 天
-- 「再发一次」→ 重新检索并完整输出
+### 5. 博主
 
-也可以显式调用技能 `dsh-search-contrl`。
+- 粘贴博主主页链接，插件按 15 个平台规则识别（B站 / 微博 / 知乎 / X / YouTube / 抖音 / 快手 / 小红书 / GitHub / Medium / Substack / CSDN / 掘金 / 少数派 / 公众号），自动得出平台与账号句柄。
+- 「预览查询」会显示这条链接实际会发出什么查询，避免写错名字白跑。
+- 博主动态支持一次读多个（`action: "bloggers"`），可配 `deep` 与 `concurrency`。
 
-## 输出格式
+### 6. 附带要点与字数
 
-标题为 `检索日报｜YYYY-MM-DD`、`检索日报｜YYYY-MM-DD 至 YYYY-MM-DD`、`检索周报｜YYYY-MM-DD 至 YYYY-MM-DD`，或按配置主题命名（如 `AI 日报｜YYYY-MM-DD`）。
+| 选项 | 默认 | 说明 |
+| --- | --- | --- |
+| 显示原链接 | 开 | 每条动态附原文链接，便于核对 |
+| 显示要点 | 开 | 给每条动态加一句摘要 |
+| 要点字数（微博） | 20 | 10–200，按 20 字挡位 |
+| 要点字数（B站） | 50 | 同上 |
+| B站平台 AI 总结 | 开 | B 站有 AI 总结接口时优先取，取不到再退回要点；空结果不缓存 |
 
-开头是一段不超过 80 字的「今日要点」或「本周判断」，随后按六个板块输出 8 至 16 条。每条包含：
+### 7. 登录 Cookie
 
-- **新闻标题** — 一句话说明发生了什么
-- **核心事实** — 主体、事件、时间与已知影响
-- **为什么重要** — 对用户、行业或后续趋势的影响
-- **成就/数据** — 指标、统计口径、时间范围与成就级别
-- **来源** — 可点击的原始链接
+需要登录态的内容（B 站视频与字幕、微博正文、知乎专栏、小红书笔记、抖音列表、X 推文、YouTube 字幕、GitHub 私有仓库）靠这里的 Cookie 抓。
 
-日期范围较长时，最后附「趋势总结」与「后续关注」。
+| 站点 | 关键 Cookie | 用来做什么 |
+| --- | --- | --- |
+| B站 | `SESSDATA` | 博主最新视频、视频信息、AI 总结与字幕 |
+| 微博 | `SUB` | 博主最新微博 |
+| 知乎 | `z_c0` | 问答与专栏正文 |
+| 小红书 | `web_session` | 博主笔记与正文 |
+| 抖音 | `sessionid` | 博主视频列表 |
+| X | `auth_token` | 博主最新推文 |
+| YouTube | `SID` / `SAPISID` / `LOGIN_INFO` | 频道视频列表与字幕 |
+| GitHub | `user_session` | 仓库、issue 与 release |
 
-## 设计原则
+用法：点「开始登录」→ 弹出浏览器窗口 → 正常登录一次 → 页面显示「已捕获」→ 关窗口。全程只在本机：Cookie 落在 `~/.dsh/plugin-data/dsh-search-contrl/`，不上传、不写日志；设置页只显示掩码。
 
-这份技能在真实使用中暴露过两类错误，规则据此收紧：
+### 8. 历史版本
 
-1. **不允许在未穷尽渠道前写「暂无」。** 曾出现国内手机板块未查品牌官网就写「暂无」、漏掉已发布机型的情况。现在必须先查官网新品页、监管备案、行业媒体三类渠道，并公开列出检查清单。
-2. **不允许只用搜索一个通道。** 搜索接口可能不可用或限流。技能内置渠道矩阵，并规定搜索失败时必须改用直接抓取具体 URL 继续采集，而不是跳过一个板块。
+- 每次保存都会把**被替换的**那一版存成快照，页面列出时间与摘要。
+- 点「回退」即恢复该快照（回退本身也会写一条快照，所以回退也能撤）。
+- 快照数量受 `historyLimit` 限制（默认保留近若干份）。
 
-技能还要求区分官方宣称与独立核验，把传闻、预告、测试、正式发布、上市、交付分别标注，且不得伪造链接、标题、数据或引述。
+---
+
+## 报告长什么样
+
+```
+# AI日报｜2026-10-30
+
+- 主题：AI（预设 tech）
+- 窗口：2026-10-29 → 2026-10-30
+- 源：10 个 RSS + 3 组检索
+
+## 国内 AI
+
+| 时间 | 事件 | 链接 |
+| --- | --- | --- |
+| 10-30 09:12 | … | https://… |
+```
+
+- 板块来自主题预设（科技 9 块：国内 AI / 国际 AI / 芯片半导体 / 国内手机 / 国内车型 / 国际车型 / 航天与科学 / 网络安全 / 产业政策）；预设没有板块时输出一张平铺候选表，不硬造板块名。
+- 输出两层：主事件（确定影响面）+ 中等事件（值得知道但不必展开）。
+- 每条外链可交给 `scripts/verify-links.mjs` 校验，24 小时磁盘缓存，76 条链接冷跑 2.2 s、热跑 9 ms。
+
+## 命令行脚本
+
+随包发布，装在 `node_modules/dsh-search-contrl/scripts/`：
+
+| 命令 | 作用 |
+| --- | --- |
+| `node scripts/daily-collect.mjs --days=7 --digest` | 采集 + 紧凑摘要（默认就只吐摘要；要整份 JSON 加 `--json`） |
+| `--topic=汽车` / `--presets` | 指定主题 / 列出 10 个预设与它们的源、板块 |
+| `--archive` | 按天落 `reports/_data/archive/<day>.json`（幂等，含全部条目供补跑） |
+| `--audit` | 逐天覆盖度审计：缺哪天就写「缺失」，并给连续覆盖天数 |
+| `--refresh` / `--cache-ttl=600` | 绕过 / 调整源缓存 |
+| `node scripts/archive-digest.mjs --window=all` | 从归档快照生成素材表（标题同样走 `reportTitle`） |
+| `node scripts/watchlist.mjs` | 管理跨期关注列表 |
+| `node scripts/archive-merge.mjs` / `archive-pull.mjs` | 合并快照 / 从 CI 拉回归档 |
+| `node scripts/report-metrics.mjs <md>` | 报告体量与 token 估算 |
+
+## 数据落在哪
+
+| 路径 | 内容 |
+| --- | --- |
+| `~/.dsh/plugin-data/dsh-search-contrl/settings.json` | 设置 |
+| `~/.dsh/plugin-data/dsh-search-contrl/history/` | 历史快照 |
+| `~/.dsh/plugin-data/dsh-search-contrl/cache/` | 检索/提取的磁盘缓存（`DSH_SEARCH_CONTRL_NO_DISK_CACHE=1` 可关） |
+| `~/.dsh/plugin-data/dsh-search-contrl/cookies*` | 登录态（本机文件） |
+| `reports/` | 报告与 `_data/archive/` 快照 |
+
+## 常见问题
+
+**「发日报」却先问我主题？** 3.0 的设计：没有主题就不猜。回答一次后可以顺手存进设置，下次一句话直达。
+
+**标题里出现了「日报」但我想要周报？** `{类型}` 按窗口长度自动判断（1 天 / 7 天内 / 更长），把 `{类型}` 从模板里删掉就不会出现。
+
+**主题匹配到了错的预设？** 在「主题 → 预设」里手工指定，比依赖自动匹配稳。
+
+**输出方式保存后又变回「只给文件」？** 页面会用响应回显校验；如果提示「被正在运行的旧版本服务端丢弃了」，说明 DSH 里跑的还是旧插件，重启即可。
+
+**检索太慢？** 先看是不是开了 Tavily `advanced`；采集侧可以把 `--concurrency` 调到 6–8，Bing 免费通道遇到 429 建议串行复测。
+
+**Cookie 点了没反应？** 确认浏览器能正常登录该站点；企业网络/代理下捕获窗口可能连不上，先关代理再试。
+
+## 开发与测试
+
+```bash
+pnpm run check    # 31 个文件的 node --check
+pnpm test         # 6 套离线测试，87 条断言
+pnpm run prepack  # 打包前自检：lib 全量语法 + client bundle + patch 存在
+```
+
+| 测试 | 断言 | 覆盖 |
+| --- | --- | --- |
+| `test-settings.mjs` | 27 | 设置归一化、标题模板、历史快照、桥接鉴权与路由 |
+| `test-presets.mjs` | 11 | 标题渲染、10 个预设的源/板块、域名匹配、设置往返 |
+| `test-client.mjs` | 6 | 客户端模块加载、slot 注册、设置卡渲染、旧服务端守卫 |
+| `test-cookie.mjs` | 32 | Cookie 罐、掩码、站点规则 |
+| `test-bloggers.mjs` | 6 | 博主链接解析与查询构造 |
+| `test-metrics.mjs` | 5 | 报告体量与 token 估算 |
 
 ## 目录结构
 
 ```
-.
-├── lib/
-│   ├── index.js          # 插件入口：注册技能、搜索工具与设置桥路由
-│   ├── client.js         # 设置页 GUI（浏览器端，plugins.row.config）
-│   ├── config.js         # 配置 schema（schemastery）
-│   ├── search-tool.js    # search_contrl 工具定义与通道路由
-│   ├── settings-store.js # 设置存储：原子写 + 历史快照 + 回退
-│   ├── settings-api.js   # 设置读写桥（同源回环校验）
-│   ├── custom-search.js  # 主题/博主链接 → 查询构造
-│   ├── bing.js           # 免费通道：Bing RSS 适配（无需 Key）
-│   └── tavily.js         # Tavily HTTP 适配层
-├── scripts/
-│   ├── test-settings.mjs # 存储、查询构造、桥接守卫的 15 个用例
-│   ├── test-client.mjs   # GUI bundle 加载与渲染冒烟
-│   ├── scan-archives.mjs # 归档页并发扫描
-│   └── verify-links.mjs  # 链接可达性校验
-├── cordis.patch.yml    # bundle patch：声明插件行
-├── package.json
-├── LICENSE
-└── README.md
+lib/
+  index.js           # 技能注册 + apply：读设置、注册检索工具与设置路由
+  client.js          # 设置页（window.__ModuleLoader__ 客户端 bundle）
+  report-title.js    # 标题模板：占位符、渲染、长度约束
+  topic-presets.js   # 10 个主题预设：别名/关键词/域名/检索词/RSS/板块
+  settings-store.js  # 设置文档：归一化、快照、回退
+  settings-api.js    # 本机 HTTP 桥接：describe/save/rollback/preview/cookie
+  search-tool.js     # 检索工具 + 内存/磁盘双层缓存
+  custom-search.js   # 主题/博主查询构造与结果过滤
+  bing.js tavily.js  # 两个检索通道
+  bilibili-api.js    # B 站接口（视频、AI 总结、字幕）
+  cookie-jar.js cookie-capture.js  # Cookie 存储与浏览器捕获
+  config.js          # Host 侧配置 schema
+scripts/             # 采集、归档、校验、测试（见上表）
+cordis.patch.yml     # bundle patch：声明插件行
 ```
 
+## 设计原则
 
-### 代码整洁约定
-
-- **新增 `export` 前先证明有外部使用者**：只有本文件或测试用到的符号不导出。当前 `lib/` 共 53 个导出，其中 12 个给 `scripts/test-*.mjs`、3 个给 `.github/workflows/verify.yml` 的离线断言。
-- **一个流程只留一个实现**：单博主与多博主的 B站读取都走 `readBilibiliCreator`，不要再各写一份。
-- **清理前先取证**：用脚本统计“本文件引用 vs 其它文件 import”，不要凭记忆删；删完跑 `npm test`（settings/client/cookie/bloggers 四组）。
-- **已弃用的发布脚本**：`publish.ps1` 已删除，发布统一走 `.github/workflows/publish.yml`（tag 触发，OIDC + provenance）。
+- **设置是唯一的真相**：技能正文不做假设，先读 `settings.json`。
+- **不猜主题**：主题缺失就反问，宁多一句也不出一份跑偏的报告。
+- **空则不编**：没有源就说明「无内置 RSS，本次靠检索」；没有板块就平铺候选表。
+- **数据留在本机**：Cookie 与缓存只写本机文件，不上传。
+- **可测**：所有纯逻辑（标题、预设、归一化、查询构造）都有离线断言。
 
 ## 许可证
 
-[MIT](./LICENSE)
-
-## 采集工具脚本（2.2.7 起随包发布）
-
-插件包里带两个不依赖 Host 的命令行工具，用来把「多轮检索」压成「一次脚本 + 一次整理」：
-
-```bash
-node scripts/daily-collect.mjs --date=2026-10-24 --max=12            # 采集当日候选（14 个 RSS 源，约 1–2 秒）
-node scripts/daily-collect.mjs --date=2026-10-25 --days=7            # 一周紧凑摘要（每板块 6 行，默认输出，省 ~90% token）
-node scripts/daily-collect.mjs --days=7 --json                       # 需要整份 JSON 时才显式要求（约 87K 字符，慎用）
-node scripts/daily-collect.mjs --days=7 --audit                      # 覆盖度审计：哪一天/哪个源条数偏少
-node scripts/watchlist.mjs --list                                    # 新品牌/创业者公司跟踪清单
-node scripts/watchlist.mjs --add="关键词A|关键词B" --name="实体名"    # 往清单里加实体
-```
-
-- `daily-collect` 会顺带做**跟踪清单比对**：JSON 里给 `watchlistHits`，`--digest` 末尾带「## 跟踪清单命中」小节。
-- 同题新闻按**标题归一化后前 20 字**去重（跨站转载只留最早一条），`stats.dupTitlesDropped` 是丢弃数。
-- `--audit` 输出按天、按源的条数表，并对 <5 条的日子给出「该日请单独补搜或读归档」提示 —— 这是发现「经常遗漏」的直接手段。
-- `--others-max` 控制未归类条目的保留上限（默认 120），`--watchlist=0` 可临时关闭清单比对。
-- 默认输出是**紧凑摘要**（`--days=7` 实测 8.6K 字符 vs 整份 JSON 87K 字符，10.1×）；整份 JSON 要显式 `--json` 或 `--out=<path>`，`--digest` 仍接受但与默认等价。
-- 源结果默认落 `scripts/.cache/feeds/`（TTL 10 分钟）：同一窗口重复整理从 ~2.6 秒降到 ~30 毫秒且不再压源；`--refresh` 强制重抓、`--cache-ttl=0` 关掉整层；某个源抓取失败会回退到 24 小时内的旧缓存，并在 `feeds.fail` 里写明回退原因。
-
-### 每日归档 + 多日合并（2.2.9 起）
-
-RSS 源只保留最近 20–60 条，**一周前的条目会被挤出**，所以「周报要覆盖完整 7 天」靠临时抓是补不回来的 —— 必须每天落一份快照。
-
-```bash
-node scripts/daily-collect.mjs --archive                 # 归档今天到 reports/_data/archive/<日期>.json（幂等）
-node scripts/daily-collect.mjs --archive --max=60 --others-max=120
-node scripts/archive-merge.mjs --days=7 --digest         # 从归档拼出 7 天窗口，缺哪天报哪天
-node scripts/archive-merge.mjs --days=7 --out=week.json  # 输出合并后的 JSON
-```
-
-- 归档文件按**采集目标日**命名（`--date` 决定），补跑历史窗口也会落到正确日期；同一日重复跑只覆盖、不累加。
-- `archive-merge` 会去重（URL + 标题归一化），并列出缺档日期：**缺档就在报告里写明，不要用相邻日期顶替**。
-
-### 不依赖本机：GitHub Actions 归档（2.2.12 起）
-
-本机常关机时，用独立仓库 **`ysyXH-0827/dsh-news-archive`** 每天 23:05（北京时间）在 GitHub 上跑同一条采集命令，把快照提交到 `archive/<日期>.json`：
-
-```bash
-node scripts/archive-pull.mjs --days=7    # 拉远端快照到本地（走 GitHub API，本机无需翻墙）
-node scripts/archive-pull.mjs --days=7 --force   # 覆盖本地已有快照
-node scripts/archive-merge.mjs --days=7 --digest  # 拼多日窗口
-```
-
-- 有 `GH_TOKEN` / `GITHUB_TOKEN` 环境变量时走 GitHub API；没有就退回 `raw.githubusercontent.com`。
-- 远端快照是同一条 `daily-collect.mjs --archive` 产出的，格式与本机一致，两者可混用。
-- 自动化（零 token）：Windows 计划任务每天 23:50 执行 `scripts/daily-archive.cmd`；macOS/Linux 用 cron：
-  ```cron
-  50 23 * * * cd /path/to/dsh && node scripts/daily-collect.mjs --archive --max=60 --others-max=120
-  ```
-
-
+MIT © ysyXH-0827

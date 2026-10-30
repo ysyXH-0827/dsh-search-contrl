@@ -23,6 +23,7 @@ import {
   restoreSettings,
   saveSettings,
 } from '../lib/settings-store.js';
+import { DEFAULT_REPORT_TITLE } from '../lib/report-title.js';
 import { buildBloggerQueries, buildTopicQueries, demoteSiteOperator, filterResultsByDomain, parseBloggerUrl, preferDeepLinks, sourceChannel } from '../lib/custom-search.js';
 import { buildSettingsRoutes, isBridgeRequestAllowed } from '../lib/settings-api.js';
 
@@ -83,6 +84,14 @@ test('normalize is idempotent', () => {
 test('normalize rejects a non-object payload', () => {
   assert.deepEqual(normalizeSettings(null), emptySettings());
   assert.deepEqual(normalizeSettings('nonsense'), emptySettings());
+});
+
+test('report title templates are normalised and defaulted', () => {
+  assert.equal(emptySettings().reportTitle, DEFAULT_REPORT_TITLE, 'a fresh store ships the default template');
+  assert.equal(normalizeSettings({}).reportTitle, DEFAULT_REPORT_TITLE);
+  assert.equal(normalizeSettings({ reportTitle: '   ' }).reportTitle, DEFAULT_REPORT_TITLE, 'a blank field falls back instead of shipping a bare date');
+  assert.equal(normalizeSettings({ reportTitle: '{主题} 财报 {日期}' }).reportTitle, '{主题} 财报 {日期}');
+  assert.ok(normalizeSettings({ reportTitle: 'x'.repeat(400) }).reportTitle.length <= 120, 'a template is capped at 120 chars');
 });
 
 test('save snapshots the version it replaces', () => {
@@ -245,6 +254,10 @@ await test('the bridge routes save, describe and roll back', async () => {
   assert.equal(first.ok, true);
   assert.equal(first.value.counts.total, 0);
   assert.equal(first.value.meta.features.delivery, true, 'describe must advertise the delivery capability');
+  assert.equal(first.value.meta.features.reportTitle, true, 'describe must advertise the title template');
+  assert.equal(first.value.meta.reportTitle.default, DEFAULT_REPORT_TITLE);
+  assert.equal(first.value.meta.reportTitle.tokens.length, 3, 'the GUI needs the placeholder chips');
+  assert.equal(first.value.meta.topicPresets.length, 10, 'the GUI needs the preset table to offer sources');
 
   const save = byPath('save');
   const seedResponse = fakeResponse();

@@ -133,8 +133,9 @@ assert.match(String(card.props.className), /tdr-card/);
 const text = textOf(card);
 for (const expected of [
   'DSH-Search-Contrl',
-  '未配置自定义项，报告按固定六板块执行',
+  '未配置自定义项，报告先问主题再检索。',
   '正在读取设置…',
+  '报告标题',
   '搜索源',
   '主题',
   '博主',
@@ -173,7 +174,7 @@ assert.ok(
 
 console.log('ok   settings.section「搜索控制」registers in the settings sidebar');
 console.log('ok   module loads and registers plugins.row.config under the patch row id');
-console.log('ok   the settings card renders its tabs, status and footer');
+console.log('ok   the settings card renders rows, status and the save bar');
 console.log('ok   the card offers the three report delivery modes');
 console.log('ok   a stale Host is reported instead of silently reverting the delivery mode');
 console.log('ok   creator links map to a platform and domain');
