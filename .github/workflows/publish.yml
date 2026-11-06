@@ -53,8 +53,24 @@ jobs:
             echo "dsh-search-contrl@$version is already on the registry; nothing to publish (tag replay is a no-op)"
             exit 0
           fi
-          npm publish --access public
+          # npm refuses a prerelease version without an explicit dist-tag,
+          # so it never becomes `latest` by accident. Publish it under the
+          # tag taken from the prerelease identifier (3.0.0-beta.2 -> beta),
+          # and keep `latest` for stable releases only.
+          pre="${version#*-}"
+          if [ "$pre" != "$version" ]; then
+            npm publish --access public --tag "${pre%%.*}"
+          else
+            npm publish --access public
+          fi
 
       - name: Dry run
         if: ${{ inputs.dry_run }}
-        run: npm publish --dry-run --access public
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          pre="${version#*-}"
+          if [ "$pre" != "$version" ]; then
+            npm publish --dry-run --access public --tag "${pre%%.*}"
+          else
+            npm publish --dry-run --access public
+          fi
