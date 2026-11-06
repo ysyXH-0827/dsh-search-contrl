@@ -126,6 +126,18 @@ check('the former technology feeds live inside presets, not in the default path'
   assert.equal(Object.keys(byId('tech').boards).length, 9);
 });
 
+check('slow feeds are marked extra-tier so a daily run never pays their timeout', () => {
+  const presets = listTopicPresets();
+  const byId = id => presets.find(item => item.id === id);
+  assert.equal(byId('tech').feeds.find(feed => feed.id === 'leiphone').tier, 'extra');
+  assert.equal(byId('auto').feeds.find(feed => feed.id === 'insideevs').tier, 'extra');
+  const extras = presets.flatMap(item => item.feeds).filter(feed => feed.tier === 'extra');
+  assert.deepEqual(extras.map(feed => feed.id).sort(), ['insideevs', 'leiphone']);
+  for (const feed of presets.flatMap(item => item.feeds)) {
+    assert.ok(feed.tier === undefined || feed.tier === 'core' || feed.tier === 'extra', feed.id + ' has an unknown tier');
+  }
+});
+
 check('an unknown topic matches nothing and gets no sources', () => {
   assert.equal(matchPreset('完全不存在的主题xyz'), null);
   assert.equal(matchPreset(''), null);

@@ -75,6 +75,13 @@ test('normalize drops empty entries and bounds fields', () => {
   assert.equal(value.bloggers.length, 1, 'a creator without a link is dropped');
 });
 
+test('a gnews channel source survives normalization and pins the provider', () => {
+  const value = normalizeSettings({ searchSources: [{ label: '谷歌新闻', type: 'gnews' }] });
+  assert.equal(value.searchSources.length, 1, 'a channel source needs no domain');
+  assert.equal(value.searchSources[0].type, 'gnews', 'an unknown type would fall back to bing');
+  assert.deepEqual(sourceChannel(value.searchSources[0]), { provider: 'gnews' });
+});
+
 test('normalize is idempotent', () => {
   const once = normalizeSettings(sample);
   const twice = normalizeSettings(once);
@@ -205,6 +212,7 @@ test('topic queries become one query, or one per domain', () => {
 test('a site source turns into a domain restriction, not a channel', () => {
   assert.deepEqual(sourceChannel({ type: 'site', domain: 'openai.com' }), { includeDomains: ['openai.com'] });
   assert.deepEqual(sourceChannel({ type: 'bing' }), { provider: 'bing' });
+  assert.deepEqual(sourceChannel({ type: 'gnews' }), { provider: 'gnews' });
   assert.deepEqual(sourceChannel({ type: 'site', domain: '' }), {});
 });
 

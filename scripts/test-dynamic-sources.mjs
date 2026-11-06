@@ -55,6 +55,7 @@ check('discoverDomains counts hosts and never returns a search engine', () => {
     { url: 'https://ithome.com/1/124.htm' },
     { url: 'https://www.bing.com/search?q=x' },
     { url: 'https://www.baidu.com/s?wd=x' },
+    { url: 'https://news.google.com/rss/articles/CBMiX' },
     { url: 'https://example.com/a' },
     { url: 'not a url' },
     {},

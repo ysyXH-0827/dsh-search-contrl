@@ -17,6 +17,18 @@ import fs from 'node:fs';
 import { renderTitle } from '../lib/report-title.js';
 import { boardsForPreset, feedsForPreset, listTopicPresets, presetForTopic } from '../lib/topic-presets.js';
 import { discoverDomains, resolveSources } from '../lib/dynamic-sources.js';
+import { googleNewsSearch } from '../lib/google-news.js';
+import {
+  FEED_CACHE_TTL_MS,
+  FEED_STALE_MS,
+  FEED_TIMEOUT_MS,
+  isExtraTier,
+  isTripped,
+  loadHealthFile,
+  recordFeedFailure,
+  recordFeedSuccess,
+  saveHealthFile,
+} from '../lib/feed-health.js';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map(a => {
@@ -64,24 +76,30 @@ const outFile = args.out ?? null;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
 // ── 源缓存：同一窗口重跑（多次整理/补跑/重试）不再压源，顺带避开 429 ──────
-// 默认 10 分钟内命中；--cache-ttl=<秒> 调 TTL，0 关闭整层；--refresh 强制重抓。
+// RSS 和 Bing 用两套 TTL：RSS 源一天只更新几次，缓存 2 小时才有意义
+// （--feed-cache-ttl=<秒> 调，0 关闭）；Bing 是即时检索，保持 10 分钟
+// （--cache-ttl=<秒> 调，0 关闭整层）；--refresh 强制重抓。
 const CACHE_DIR = 'scripts/.cache/feeds';
 const CACHE_TTL_MS = Math.max(0, Number(args['cache-ttl'] ?? 600) * 1000);
-const CACHE_STALE_MS = 24 * 3600_000;   // 抓取失败时允许回退的「陈旧」上限
+const FEED_TTL_MS = Math.max(0, Number(args['feed-cache-ttl'] ?? (FEED_CACHE_TTL_MS / 1000)) * 1000);
+const CACHE_STALE_MS = FEED_STALE_MS;   // 抓取失败时允许回退的「陈旧」上限
 const cacheOn = CACHE_TTL_MS > 0 && !args.refresh;
+const feedCacheOn = FEED_TTL_MS > 0 && !args.refresh;
 const cachePath = key => `${CACHE_DIR}/${String(key).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80)}.json`;
+// 源健康档案：哪个源连续失败过几次、上次成功什么时候。熔断就靠它记。
+const HEALTH_FILE = `${CACHE_DIR}/_health.json`;
+const health = loadHealthFile(HEALTH_FILE);
 
 function cacheRead(key) {
-  if (!cacheOn) return null;
   try {
     const e = JSON.parse(fs.readFileSync(cachePath(key), 'utf8'));
     return Array.isArray(e?.items) ? { at: Number(e.at ?? 0), items: e.items } : null;
   } catch { return null; }
 }
 
-function cacheWrite(key, items) {
+function cacheWrite(key, items, enabled = cacheOn) {
   // 空结果不落盘：否则一次 429 的「0 条」会被当成事实缓存一整天。
-  if (!cacheOn || !Array.isArray(items) || !items.length) return;
+  if (!enabled || !Array.isArray(items) || !items.length) return;
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
     fs.writeFileSync(cachePath(key), JSON.stringify({ at: Date.now(), key: String(key), items }));
@@ -161,9 +179,14 @@ function toBeijingTime(raw) {
 const from = new Date(new Date(date + 'T00:00:00+08:00').getTime() - (days - 1) * 86400_000);
 const to = new Date(new Date(date + 'T23:59:59+08:00').getTime());
 
+// Google News 发现查询的日期窗口：after:/before: 各放宽一天（它对边界是
+// 模糊的，精确过滤由下游的窗口过滤按 pubDate 做）。裸日期不能当关键词拼。
+const gnewsAfter = new Date(from.getTime() - 86400_000 + 8 * 3600_000).toISOString().slice(0, 10);
+const gnewsBefore = new Date(to.getTime() + 86400_000 + 8 * 3600_000).toISOString().slice(0, 10);
+
 async function fetchFeed(feed) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 10000);
+  const timer = setTimeout(() => ctrl.abort(), FEED_TIMEOUT_MS);
   try {
     const r = await fetch(feed.url, { headers: { 'user-agent': UA, 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.6' }, signal: ctrl.signal, redirect: 'follow' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -207,12 +230,35 @@ async function bingRss(query) {
   } finally { clearTimeout(timer); }
 }
 
+// 发现查询默认走 Google News RSS（免费、真新闻源），失败或没结果时回落
+// 到 Bing。查询带 after:/before: 把窗口框在采集窗口前后各一天：Google
+// News 按相关度排序不按时间，不框日期会返回几年前的旧闻；精确的新旧由
+// 下游的日期窗口按 pubDate 过滤。
+// Google News 的 <link> 是站内跳转地址，点开能看；真实域名由 <source>
+// 媒体名经 outletDomain 映射得到，存在 publisherDomain 里，供
+// discoverDomains() 统计。
+async function googleNewsRss(query) {
+  const result = await googleNewsSearch(`${query} after:${gnewsAfter} before:${gnewsBefore}`);
+  if (!result.ok) throw new Error(result.error);
+  const raw = result.data.results.map(i => ({
+    title: i.title, url: i.url, desc: i.content ?? '',
+    source: i.source ?? '',
+    ...(typeof i.publisherDomain === 'string' && i.publisherDomain !== '' ? { publisherDomain: i.publisherDomain } : {}),
+    at: toBeijingTime(i.published_date ?? ''),
+  }));
+  const kept = raw.filter(item => !isIndexLike(item));
+  if (kept.length < raw.length) skippedIndex += raw.length - kept.length;
+  return kept;
+}
+
 const t0 = Date.now();
 const errors = [];
 const okFeeds = [];
 const all = [];
 let cacheHits = 0;
 let staleHits = 0;
+const tripped = [];
+const skippedExtra = [];
 // Bing 通道丢掉的门户页数量：报进摘要，避免用户以为检索没结果
 let skippedIndex = 0;
 
@@ -234,22 +280,53 @@ const CONCURRENCY = Math.max(1, Number(args.concurrency ?? 5));
 const jobs = [mapLimit(FEEDS, CONCURRENCY, async feed => {
   const push = items => { for (const it of items) all.push({ ...it, source: feed.id, at: toBeijingTime(it.atRaw) }); };
   const hit = cacheRead(feed.id);
-  if (hit && Date.now() - hit.at <= CACHE_TTL_MS) {
+  const ageMin = hit ? Math.round((Date.now() - hit.at) / 60000) : 0;
+  // 补充源（tier extra，如雷锋网/InsideEVs）：日报只读缓存不现抓，慢源
+  // 不再拖日报的 10 秒；周报/月报仍现抓（仍受熔断与 5 秒超时约束）。
+  if (isExtraTier(feed) && days === 1) {
+    if (feedCacheOn && hit && Date.now() - hit.at <= CACHE_STALE_MS) {
+      const fresh = Date.now() - hit.at <= FEED_TTL_MS;
+      if (fresh) cacheHits += 1; else staleHits += 1;
+      okFeeds.push({ id: feed.id, items: hit.items.length, cached: true, ...(fresh ? {} : { stale: true }) });
+      push(hit.items);
+    } else {
+      skippedExtra.push(feed.id);
+    }
+    return;
+  }
+  if (feedCacheOn && hit && Date.now() - hit.at <= FEED_TTL_MS) {
     cacheHits += 1;
     okFeeds.push({ id: feed.id, items: hit.items.length, cached: true });
     push(hit.items);
     return;
   }
+  // 熔断：连续失败两次且在冷却期内，不再付超时成本，直接用旧缓存顶上。
+  // --refresh 是用户明确要新数据，绕过熔断。
+  if (!args.refresh && isTripped(health, feed.id)) {
+    tripped.push(feed.id);
+    if (feedCacheOn && hit && Date.now() - hit.at <= CACHE_STALE_MS) {
+      staleHits += 1;
+      errors.push(`${feed.id}: 熔断跳过（连续失败 ${health[feed.id].fails} 次），回退 ${ageMin} 分钟前缓存`);
+      okFeeds.push({ id: feed.id, items: hit.items.length, cached: true, stale: true });
+      push(hit.items);
+    } else {
+      errors.push(`${feed.id}: 熔断跳过（连续失败 ${health[feed.id].fails} 次），无可用缓存`);
+    }
+    return;
+  }
   try {
+    const started = Date.now();
     const items = await fetchFeed(feed);
-    cacheWrite(feed.id, items);
+    recordFeedSuccess(health, feed.id, Date.now() - started);
+    cacheWrite(feed.id, items, feedCacheOn);
     okFeeds.push({ id: feed.id, items: items.length });
     push(items);
   } catch (e) {
+    recordFeedFailure(health, feed.id);
     // 抓取失败先看有没有 24h 内的旧缓存：少一个源的候选，比整次采集缺一块代价大。
-    if (hit && Date.now() - hit.at <= CACHE_STALE_MS) {
+    if (feedCacheOn && hit && Date.now() - hit.at <= CACHE_STALE_MS) {
       staleHits += 1;
-      errors.push(`${feed.id}: 抓取失败，回退 ${Math.round((Date.now() - hit.at) / 60000)} 分钟前缓存（${String(e?.message ?? e).slice(0, 40)}）`);
+      errors.push(`${feed.id}: 抓取失败，回退 ${ageMin} 分钟前缓存（${String(e?.message ?? e).slice(0, 40)}）`);
       okFeeds.push({ id: feed.id, items: hit.items.length, cached: true, stale: true });
       push(hit.items);
       return;
@@ -266,25 +343,48 @@ const seedQueries = args.bing
   ? String(args.bing).split("|").map(s => s.trim()).filter(Boolean)
   : sourcePlan.queries.slice();
 const bingQueries = [...new Set(seedQueries)].slice(0, 8);
-const bingItems = [];
+const discoveryItems = [];
+const discoveryProviders = new Set();
+// 发现通道顺序：--discovery-provider=bing|gnews 优先；没传时看设置文件里的
+// searchProvider（GUI 设置文件一般不含这个字段——它是 DSH 配置页的
+// searchProvider，脚本读不到，所以脚本路径用命令行开关，DSH 工具路径直接
+// 读配置）；都没给时默认 Google News 优先，另一条通道永远是备用。两条通道
+// 各用各的缓存键，备用通道的结果不会污染主通道的缓存。
+const discoveryFlag = String(args['discovery-provider'] ?? '').toLowerCase();
+const discoveryFirst = discoveryFlag === 'bing' || discoveryFlag === 'gnews'
+  ? discoveryFlag
+  : (settings.searchProvider === 'bing' ? 'bing' : 'gnews');
 const bingJobs = bingQueries.map(async q => {
-  const key = `bing-${q}`;
-  const push = items => { for (const it of items) { all.push({ ...it, atRaw: it.at, title: it.title }); bingItems.push(it); } };
-  const hit = cacheRead(key);
-  if (hit && Date.now() - hit.at <= CACHE_TTL_MS) {
+  const push = (items, provider) => {
+    discoveryProviders.add(provider);
+    for (const it of items) { all.push({ ...it, atRaw: it.at, title: it.title }); discoveryItems.push(it); }
+  };
+  const pushCached = (key, provider) => {
+    const hit = cacheRead(key);
+    if (!cacheOn || !hit || Date.now() - hit.at > CACHE_TTL_MS) return false;
     cacheHits += 1;
     // A cache written before the index-page filter existed still holds portal rows;
     // filtering on read makes an old cache behave like a fresh fetch.
     const kept = hit.items.filter(item => !isIndexLike(item));
     if (kept.length < hit.items.length) skippedIndex += hit.items.length - kept.length;
-    push(kept);
-    return;
+    push(kept, provider);
+    return true;
+  };
+  const channels = discoveryFirst === 'bing' ? ['bing', 'gnews'] : ['gnews', 'bing'];
+  const failures = [];
+  for (const channel of channels) {
+    if (pushCached(`${channel}-${q}`, channel)) return;
+    try {
+      const items = channel === 'gnews' ? await googleNewsRss(q) : await bingRss(q);
+      if (items.length === 0) throw new Error(`${channel} answered nothing`);
+      cacheWrite(`${channel}-${q}`, items);
+      push(items, channel);
+      return;
+    } catch (e) {
+      failures.push(`${channel} 失败（${String(e?.message ?? e).slice(0, 40)}）`);
+    }
   }
-  try {
-    const items = await bingRss(q);
-    cacheWrite(key, items);
-    push(items);
-  } catch (e) { errors.push(`bing:${q}: ${String(e?.message ?? e).slice(0, 60)}`); }
+  errors.push(`discover:${q}: ${failures.join('，')}`);
 });
 
 // ── 进程级兜底：undici 偶发在 socket end 回调里抛断言（Parser.finish assert(!this.paused)）──
@@ -310,10 +410,13 @@ const deadline = new Promise(res => {
 });
 await Promise.race([Promise.all([...jobs, ...bingJobs]), deadline]);
 clearTimeout(deadlineTimer);
+saveHealthFile(HEALTH_FILE, health);
 
-// 动态源：无预设时，Bing 第一轮的回答域名就是本次的源。只统计 Bing
-// 结果，不统计 RSS——RSS 域名是预设给的，不是按问题发现的。
-const discoveredDomains = sourcePlan.mode === 'dynamic' ? discoverDomains(bingItems, 4) : [];
+// 动态源：无预设时，第一轮的回答域名就是本次的源。只统计检索结果，
+// 不统计 RSS——RSS 域名是预设给的，不是按问题发现的。Google News 的
+// 域名信号是 <source> 媒体名映射出的 publisherDomain，不是跳转链接的
+// news.google.com（见 lib/google-news.js）。
+const discoveredDomains = sourcePlan.mode === 'dynamic' ? discoverDomains(discoveryItems, 4) : [];
 
 // 日期窗口过滤（无日期的保留，标注 unknown）
 const windowed = all.filter(it => {
@@ -400,6 +503,7 @@ const payload = {
     presetId: sourcePlan.presetId,
     discoveryQueries: sourcePlan.queries,
     discoveredDomains,
+    discoveryProvider: [...discoveryProviders].join('+') || 'none',
     reason: sourcePlan.reason,
   },
   feedsPlanned: FEEDS.length,
@@ -417,6 +521,8 @@ const payload = {
     dupTitlesDropped: dupTitles,
     cacheHits,
     staleHits,
+    trippedFeeds: tripped,
+    skippedExtraFeeds: skippedExtra,
     boardCounts: Object.fromEntries(Object.entries(boards).map(([b, v]) => [b, v.length])),
     byDay: byDayCounts(uniqueItems),
     bySource: bySourceCounts(uniqueItems),
@@ -459,7 +565,9 @@ if (archiveDir) {
 }
 process.stderr.write(`[daily-collect] ${windowed.length} 条 / ${okFeeds.length}源 / ${payload.stats.elapsedMs}ms / 事件程度 ${scale}（目标 ${policy.reportItems} 条） ${JSON.stringify(payload.stats.boardCounts)}\n`);
 if (degraded) process.stderr.write(`[daily-collect] ⚠️ 降级 ${degraded} 次（崩溃/超时兜底），结果可能缺少个别源\n`);
-if (cacheHits || staleHits) process.stderr.write(`[daily-collect] 源缓存命中 ${cacheHits} 个源（陈旧回退 ${staleHits}）${cacheOn ? '' : '；缓存已关闭'}\n`);
+if (cacheHits || staleHits) process.stderr.write(`[daily-collect] 源缓存命中 ${cacheHits} 个源（陈旧回退 ${staleHits}）${cacheOn || feedCacheOn ? '' : '；缓存已关闭'}\n`);
+if (tripped.length) process.stderr.write(`[daily-collect] 熔断跳过 ${tripped.length} 个源：${tripped.join('、')}（连续失败 2 次，24 小时内不再现抓）\n`);
+if (skippedExtra.length) process.stderr.write(`[daily-collect] 日报跳过补充源 ${skippedExtra.length} 个：${skippedExtra.join('、')}（只读缓存，周报/月报才现抓）\n`);
 if (errors.length) process.stderr.write(`[daily-collect] 失败: ${errors.join('; ')}\n`);
 if (watchlist.length) {
   const who = [...new Set(watchlistHits.map(h => h.name))];
@@ -498,6 +606,9 @@ if (args.audit) {
 // 实测 --days=7：摘要 8,614 字符 vs 整份 JSON 86,635 字符（10.1×）。整份 JSON 改成显式 --json 才吐：
 // 「想看一眼」和「要喂下游」是两种用法，默认取便宜的那个，--digest 保留兼容（等价于默认）。
 // 每板块行数：单日默认 3 行、多日窗口默认 6 行（--digest-max=N 可调）：日报一天每板块顶多 2–3 条，周报要铺开。
+// 摘要头的窗口日期用北京时间：toISOString() 是 UTC，早上会把今天显示成昨天。
+const windowFromDay = new Date(from.getTime() + 8 * 3600_000).toISOString().slice(0, 10);
+const windowToDay = new Date(to.getTime() + 8 * 3600_000).toISOString().slice(0, 10);
 if (!args.json) {
   const cut = s => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
   // 单日默认 3 行；多日窗口（周报/月报）默认 6 行，否则模型看不全 30+ 条候选。
@@ -508,9 +619,14 @@ if (!args.json) {
     lines.push(`# 注意：主题「${topic ? topic.label : "未指定"}」没有内置 RSS，候选只来自检索种子${bingQueries.length ? `（${bingQueries.length} 条）` : "（本次 0 条）"} —— 需要联网检索补齐。`);
   }
   const filtered = skippedIndex > 0 ? ` / 检索结果已过滤门户页 ${skippedIndex} 条` : "";
-  lines.push(`# ${title}｜候选 ${windowed.length} 条 / ${okFeeds.length} 源 / ${payload.stats.elapsedMs}ms / 窗口 ${from.toISOString().slice(0, 10)}~${to.toISOString().slice(0, 10)} / 事件程度 ${scale}（每板块最多 ${cap} 行）${filtered}`);
+  lines.push(`# ${title}｜候选 ${windowed.length} 条 / ${okFeeds.length} 源 / ${payload.stats.elapsedMs}ms / 窗口 ${windowFromDay}~${windowToDay} / 事件程度 ${scale}（每板块最多 ${cap} 行）${filtered}`);
   if (sourcePlan.mode === 'dynamic') {
-    lines.push(`# 搜索源：无预设，按问题动态发现——发现查询 ${sourcePlan.queries.join('；')}${discoveredDomains.length ? `；答了的域名 ${discoveredDomains.map(d => `${d.domain}(${d.count})`).join('、')}` : '；本轮未发现可用域名'}`);
+    const channel = discoveryProviders.has('gnews') && discoveryProviders.has('bing')
+      ? 'Google News RSS + Bing（备用）'
+      : discoveryProviders.has('bing')
+        ? 'Bing（Google News 不可用）'
+        : 'Google News RSS';
+    lines.push(`# 搜索源：无预设，按问题动态发现——发现查询 ${sourcePlan.queries.join('；')}${discoveredDomains.length ? `；答了的域名 ${discoveredDomains.map(d => `${d.domain}(${d.count})`).join('、')}` : '；本轮未发现可用域名'}；发现通道 ${channel}`);
   }
   for (const [board, items] of Object.entries(boards)) {
     lines.push(`\n## ${board}（${items.length} → 取前 ${Math.min(cap, items.length)}）`);

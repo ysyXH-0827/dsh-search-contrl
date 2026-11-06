@@ -137,6 +137,7 @@ for (const expected of [
   '正在读取设置…',
   '报告标题',
   '搜索源',
+  'Google News',
   '主题',
   '博主',
   '历史版本',
@@ -159,6 +160,14 @@ assert.equal(link.platform, 'B站');
 assert.equal(exports.describeLink('not a url'), null);
 assert.equal(exports.describeLink('https://example.com/x'), null);
 
+assert.ok(
+  source.includes('{ value: "gnews", label: "Google News 免费通道" }'),
+  'the source type picker must offer the Google News free channel'
+);
+assert.ok(
+  source.includes('免费 Google News / Bing 通道'),
+  'the empty source state must name the free channels the default run uses'
+);
 assert.ok(
   source.includes('features?.delivery !== true'),
   'the card must detect a Host that is still running a pre-2.2.0 plugin'

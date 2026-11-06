@@ -13,7 +13,7 @@
 | 不再白跑 | undici 的 `assert(!this.paused)` 断言会在 socket 回调里炸掉整个进程；进程级兜底 + 45 s 看门狗之后，实测连跑 12 次全部正常收尾，个别源超时会被降级记录而不是丢结果。 |
 | 审计不撒谎 | `--audit` 会按你要的窗口逐天列出条数，缺的 5 天就写「缺失」，而不是只看有数据的那几天报「✅ 覆盖正常」。 |
 | 设置页和官方一致 | 分区 + 行 + 开关 + 底部保存条，样式走 DSH 设计令牌（`--dsw-alias-*`），并保留历史版本回退。 |
-| 离线可测 | 7 套不联网的测试共 94 条断言，`pnpm test` 一把过。 |
+| 离线可测 | 9 套不联网的测试共 112 条断言，`pnpm test` 一把过。 |
 
 ## 3.0 有什么不一样
 
@@ -30,12 +30,36 @@
 ## 搜索源：预设 + 动态发现
 
 - 命中预设：用预设的 `feeds` 抓 RSS，用 `boards` 做板块，用 `queries` 做检索种子。
-- 没命中预设：按用户问题动态定。实现在 `lib/dynamic-sources.js`：
+- 没命中预设：按用户问题动态定。实现在 `lib/dynamic-sources.js`（解析与统计）与 `lib/google-news.js`（发现通道）：
   1. 解析问题，去掉「日报/周报/最近 7 天/帮我」等词，留下关键词；
   2. 拼 3 条发现查询：`关键词 最新`、`关键词 发布 公告`、`关键词 官网`；
-  3. 跑一轮，统计哪些域名真的答了（排除搜索引擎和百科/词典站），取前 4 个；
-  4. 用 `site:域名 关键词` 定向再搜一轮。没答过的域名不进源清单。
-- 费用：动态发现全程只走免费 Bing 通道，`provider: bing`、`allowPaidFallback: false`，0 Tavily credit。Tavily 只在用户明确指定或预设流程里、且配置了 Key 时才用；`extract` 需要 Key。
+  3. 发现轮默认先走免费 Google News RSS（失败或没结果时回落到 Bing），查询带 `after:`/`before:` 把窗口框在采集窗口前后各一天（Google News 按相关度排序不按时间，不框日期会返回几年前的旧闻；裸日期不能当关键词拼）；统计哪些域名真的答了（排除搜索引擎和百科/词典站；Google News 的链接是站内跳转、不暴露真实域名，所以按 `<source>` 媒体名查表映射到域名，未收录的媒体只出候选、不进定向源），取前 4 个；发现通道跟设置页的开关走：配置页 `searchProvider` 切到 `bing` 时发现轮改走 Bing 优先（DSH 工具路径），脚本路径用 `--discovery-provider=bing|gnews`（默认 gnews）；
+  4. 用 `site:域名 关键词` 定向再搜一轮（仍走 Bing）。没答过的域名不进源清单。
+- 费用：动态发现全程不走 Tavily、不做 `extract`，0 Tavily credit。Tavily 只在用户明确指定或预设流程里、且配置了 Key 时才用；`extract` 需要 Key。Google News RSS 和 Bing RSS 一样免费，不用 Key。
+- 为什么换成 Google News：实测「脑机接口 最新」，Bing 发现轮答的是百度经验、知乎、搜狗问问，Google News 答的是新京报、财联社、央视网、科学网。同一条查询、同一个成本，源的质量差了一个级别。
+
+## RSS 采集优化：熔断、缓存与预热
+
+实测（2026-11-07，14 个源、并发 5）：12 个源 3.4 秒内全部回来，但雷锋网和 InsideEVs 各卡满 10 秒超时、36氪直接报错——冷跑 10 秒全是慢源拖的。优化分三层：
+
+### 慢源熔断
+
+- 单源超时从 10 秒砍到 5 秒（健康的源最慢 3.4 秒，5 秒留有余地）。
+- 每个源的成败记在 `scripts/.cache/feeds/_health.json`：连续失败 2 次就熔断，24 小时内不再现抓，直接用 24 小时内的旧缓存顶上，并在摘要里写明；24 小时后自动重试一次，好了就恢复，失败继续熔断。一次成功就把失败计数清零。
+- `--refresh` 是用户明确要新数据，会绕过熔断。
+
+### 补充源分级
+
+- 雷锋网（`leiphone`）和 InsideEVs（`insideevs`）在预设里标为 `tier: 'extra'` 补充源：日报（`--days=1`）只读它们的缓存，不现抓；周报/月报仍现抓（仍受熔断与 5 秒超时约束）。其他 12 个源是核心源，每次都抓。
+- 实现在 `lib/feed-health.js`（`isExtraTier`），判断逻辑与熔断一样是纯函数，见 `scripts/test-feed-health.mjs`。
+
+### 缓存分级与定时预热
+
+- RSS 和 Bing 用两套 TTL：RSS 缓存 2 小时（`--feed-cache-ttl=<秒>`，默认 7200），Bing 检索保持 10 分钟（`--cache-ttl=<秒>`，默认 600）。RSS 源一天只更新几次，10 分钟缓存对日报基本等于没有。
+- 定时预热必须跑在 DSH 所在的机器上（缓存就在那台机器的 `scripts/.cache/feeds` 里，CI 够不着）：
+  - Windows：用任务计划程序每 2 小时跑一次 `scripts/warmup.cmd`（已随包发布，见文件头注释）。
+  - macOS / Linux：`0 */2 * * * cd <DSH profile>/node_modules/dsh-search-contrl && node scripts/daily-collect.mjs --days=1 --archive >> scripts/.cache/warmup.log 2>&1`
+- 预热只做两件事：抓一次当日源（写缓存）、落一份当日归档快照。不发报告、不改设置。
 
 ## 设置页逐项说明
 
@@ -57,11 +81,12 @@
 
 | 类型 | 说明 | 需要密钥 |
 | --- | --- | --- |
-| Bing 免费通道 | 默认可用，走 Bing 的 RSS 输出，条数有限 | 否 |
+| Bing 免费通道 | 走 Bing 的 RSS 输出，条数有限 | 否 |
+| Google News 免费通道 | 免费，覆盖真实新闻媒体，一页约 40 条；动态发现的默认通道 | 否 |
 | Tavily | 有 AI 摘要和更长的正文提取，`searchDepth` 可选 basic / advanced | 是（`tavilyApiKey`） |
 | 指定站点 | 把检索限制在某个域名内（等价于 `site:`），适合盯一家媒体或一个公告库 | 否 |
 
-每条源可单独开关；「指定站点」只填域名即可（粘整条 URL 会被自动截成主机名）。
+每条源可单独开关；「指定站点」只填域名即可（粘整条 URL 会被自动截成主机名）。通道型源会固定 `provider`：`search` / `batch` / `topic` 传 `sourceId` 就走这条通道；配置页的 `searchProvider`（`auto` / `bing` / `gnews` / `tavily`）则是没传 `sourceId` 时的默认通道，`auto` 仍是 Bing 优先、失败才回退 Tavily。
 
 ### 博主
 
@@ -104,7 +129,7 @@ lib/
   settings-api.js    # 本机 HTTP 桥接：describe/save/rollback/preview/cookie
   search-tool.js     # 检索工具 + 内存/磁盘双层缓存
   custom-search.js   # 主题/博主查询构造与结果过滤
-  bing.js tavily.js  # 两个检索通道
+  bing.js google-news.js tavily.js  # 三个检索通道：Bing RSS、Google News RSS、Tavily
   bilibili-api.js    # B 站接口（视频、AI 总结、字幕）
   cookie-jar.js cookie-capture.js  # Cookie 存储与浏览器捕获
   config.js          # Host 侧配置 schema

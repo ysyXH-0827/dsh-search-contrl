@@ -120,7 +120,7 @@ Host 侧配置（可选，改完需重启 profile）：
 
 ```bash
 pnpm run check    # 全量 node --check
-pnpm test         # 7 套离线测试，94 条断言
+pnpm test         # 9 套离线测试，112 条断言
 pnpm run prepack  # 打包前自检：lib 语法 + client bundle + patch 存在
 ```
 
