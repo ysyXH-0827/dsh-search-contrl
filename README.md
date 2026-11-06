@@ -2,7 +2,7 @@
 
 **给 DeepSeek Harness 用的「主题搜索 + 中文报告」技能/插件。3.0 起不再默认科技：先问你要什么主题，再按问题定搜索源。**
 
-`3.0.0-beta.1` · DSH `>= 0.2.0` · Node.js `>= 20` · MIT
+`3.0.0-beta.2` · DSH `>= 0.2.0` · Node.js `>= 20` · MIT
 
 ## 它是什么
 
@@ -72,7 +72,7 @@ Host 侧配置（可选，改完需重启 profile）：
 
 升级：`pnpm add dsh-search-contrl@latest` 后重启 DSH。回退到稳定版：`pnpm add dsh-search-contrl@2.2.18`。卸载：从 `dependencies` 和 `bundles` 移除，`pnpm install`，重启；设置在 `~/.dsh/plugin-data/dsh-search-contrl/`，需要时手动删。
 
-> `3.0.0-beta.1` 是 beta：功能完整、测试全绿，设置页和技能话术可能还会调整。想要稳定版请留在 `2.2.18`。
+> `3.0.0-beta.2` 是 beta：功能完整、测试全绿，设置页和技能话术可能还会调整。想要稳定版请留在 `2.2.18`。
 
 ## 报告长什么样
 
