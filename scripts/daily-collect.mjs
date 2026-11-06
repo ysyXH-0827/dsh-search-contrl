@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import { renderTitle } from '../lib/report-title.js';
 import { boardsForPreset, feedsForPreset, listTopicPresets, presetForTopic } from '../lib/topic-presets.js';
+import { discoverDomains, resolveSources } from '../lib/dynamic-sources.js';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map(a => {
@@ -257,14 +258,18 @@ const jobs = [mapLimit(FEEDS, CONCURRENCY, async feed => {
   }
 })];
 
-// 检索种子：显式 --bing 优先；否则用主题预设的检索词；再否则用主题关键词本身。
+// 搜索源：先问用户问了什么，再定源。预设只是捷径：命中预设用预设的
+// feeds/domains/queries；没命中就按问题动态发现——先用发现查询探一轮，
+// 再把真正答了的域名当作源，而不是只拿主题关键词拼一条宽查询。
+const sourcePlan = resolveSources({ question: topic?.label ?? '', topic, preset });
 const seedQueries = args.bing
   ? String(args.bing).split("|").map(s => s.trim()).filter(Boolean)
-  : (preset && preset.queries.length ? preset.queries.slice() : (topic && topic.keywords ? topic.keywords.map(k => `${topic.label} ${k}`.trim()) : []));
+  : sourcePlan.queries.slice();
 const bingQueries = [...new Set(seedQueries)].slice(0, 8);
+const bingItems = [];
 const bingJobs = bingQueries.map(async q => {
   const key = `bing-${q}`;
-  const push = items => { for (const it of items) all.push({ ...it, atRaw: it.at, title: it.title }); };
+  const push = items => { for (const it of items) { all.push({ ...it, atRaw: it.at, title: it.title }); bingItems.push(it); } };
   const hit = cacheRead(key);
   if (hit && Date.now() - hit.at <= CACHE_TTL_MS) {
     cacheHits += 1;
@@ -305,6 +310,10 @@ const deadline = new Promise(res => {
 });
 await Promise.race([Promise.all([...jobs, ...bingJobs]), deadline]);
 clearTimeout(deadlineTimer);
+
+// 动态源：无预设时，Bing 第一轮的回答域名就是本次的源。只统计 Bing
+// 结果，不统计 RSS——RSS 域名是预设给的，不是按问题发现的。
+const discoveredDomains = sourcePlan.mode === 'dynamic' ? discoverDomains(bingItems, 4) : [];
 
 // 日期窗口过滤（无日期的保留，标注 unknown）
 const windowed = all.filter(it => {
@@ -386,6 +395,13 @@ const payload = {
   scale,
   title,
   topic: topic ? { label: topic.label, preset: preset ? preset.id : null, keywords: topic.keywords ?? [] } : null,
+  sources: {
+    mode: sourcePlan.mode,
+    presetId: sourcePlan.presetId,
+    discoveryQueries: sourcePlan.queries,
+    discoveredDomains,
+    reason: sourcePlan.reason,
+  },
   feedsPlanned: FEEDS.length,
   scalePolicy: policy,
   window: { days, from: from.toISOString(), to: to.toISOString() },
@@ -493,6 +509,9 @@ if (!args.json) {
   }
   const filtered = skippedIndex > 0 ? ` / 检索结果已过滤门户页 ${skippedIndex} 条` : "";
   lines.push(`# ${title}｜候选 ${windowed.length} 条 / ${okFeeds.length} 源 / ${payload.stats.elapsedMs}ms / 窗口 ${from.toISOString().slice(0, 10)}~${to.toISOString().slice(0, 10)} / 事件程度 ${scale}（每板块最多 ${cap} 行）${filtered}`);
+  if (sourcePlan.mode === 'dynamic') {
+    lines.push(`# 搜索源：无预设，按问题动态发现——发现查询 ${sourcePlan.queries.join('；')}${discoveredDomains.length ? `；答了的域名 ${discoveredDomains.map(d => `${d.domain}(${d.count})`).join('、')}` : '；本轮未发现可用域名'}`);
+  }
   for (const [board, items] of Object.entries(boards)) {
     lines.push(`\n## ${board}（${items.length} → 取前 ${Math.min(cap, items.length)}）`);
     for (const it of items.slice(0, cap)) lines.push(`${(it.at ?? '').slice(0, 16)}｜${cut(it.title)}｜${it.url}`);
