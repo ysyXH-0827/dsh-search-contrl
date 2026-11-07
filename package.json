@@ -1,6 +1,6 @@
 {
   "name": "dsh-search-contrl",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "DSH-Search-Contrl: a DSH skill/plugin for scoped web search and Chinese reports on any topic. No default topic: it asks first, then picks sources from a topic preset table. Settings GUI for custom report titles, search sources, topics, creator links, post-length limits and one-click rollback.",
   "private": false,
   "type": "module",
