@@ -10,6 +10,7 @@
 //   node scripts/daily-collect.mjs --bing="固态电池 量产|光刻机"  # 额外补 Bing 免费 RSS 关键词检索
 //   node scripts/daily-collect.mjs --days=7 --json               # 要整份 JSON 才加 --json（默认紧凑摘要）
 //   node scripts/daily-collect.mjs --concurrency=5 --total-timeout=45000   # 有界并发 / 总时长看门狗
+//   node scripts/daily-collect.mjs --date=2026-11-06 --days=1 --from-archive   # 重跑过去某天：先读归档快照，整窗覆盖就跳过现抓
 //   node scripts/daily-collect.mjs --refresh --cache-ttl=0       # 绕过来源缓存（默认 10 分钟命中）
 // 输出：默认纯文本摘要；--json 输出 JSON {title, topic, window, feeds{ok[],fail[]}, boards, others, stats}
 
@@ -29,6 +30,7 @@ import {
   recordFeedSuccess,
   saveHealthFile,
 } from '../lib/feed-health.js';
+import { loadArchiveWindow } from '../lib/archive-store.js';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map(a => {
@@ -265,6 +267,33 @@ const skippedExtra = [];
 // Bing 通道丢掉的门户页数量：报进摘要，避免用户以为检索没结果
 let skippedIndex = 0;
 
+// ── --from-archive：重跑过去某天时先读归档快照，不再只认 RSS 当下窗口 ──
+// RSS 只留最近 20–60 条，隔天重跑会丢早段条目（2026-11-07 实测：102 → 95）。
+// 快照的 allItems 含相邻日期，窗口过滤仍按 it.at 做，所以归档条目先进 all
+// 数组，后续的窗口过滤、去重、板块匹配都不用改。--refresh 强制现抓，忽略
+// 归档（现有语义不变）。
+const fromArchiveDir = args['from-archive'] ? String(args['from-archive'] === 'true' ? 'reports/_data/archive' : args['from-archive']) : null;
+const archiveOn = Boolean(fromArchiveDir) && !args.refresh;
+const dayList = Array.from({ length: days }, (_, i) =>
+  new Date(from.getTime() + i * 86400_000 + 8 * 3600_000).toISOString().slice(0, 10));
+let archiveStat = { days: [], items: 0, skippedLive: false };
+if (fromArchiveDir && args.refresh) {
+  process.stderr.write('[daily-collect] --refresh 已指定，忽略 --from-archive\n');
+}
+if (archiveOn) {
+  const win = loadArchiveWindow(fromArchiveDir, dayList, { label: topic?.label ?? null, preset: preset?.id ?? null });
+  archiveStat = {
+    days: win.covered,
+    items: win.items.length,
+    skippedLive: win.covered.length === dayList.length && win.covered.length > 0,
+  };
+  for (const it of win.items) all.push(it);
+  const skippedNote = win.skipped.length
+    ? `；未覆盖 ${win.skipped.map(s => `${s.day}(${s.reason})`).join('、')}`
+    : '';
+  process.stderr.write(`[daily-collect] 归档覆盖 ${win.covered.length ? win.covered.join('、') : '无'}（${win.items.length} 条）${archiveStat.skippedLive ? '，跳过现抓' : '，其余日期现抓'}${skippedNote}\n`);
+}
+
 // 有界并发：14 个源一次性全发会同时压两端 socket，也是 undici 断言崩溃的诱因之一（LESSONS 规则 #7）。
 async function mapLimit(list, limit, fn) {
   const out = new Array(list.length);
@@ -280,7 +309,7 @@ async function mapLimit(list, limit, fn) {
 
 const CONCURRENCY = Math.max(1, Number(args.concurrency ?? 5));
 
-const jobs = [mapLimit(FEEDS, CONCURRENCY, async feed => {
+const jobs = archiveStat.skippedLive ? [] : [mapLimit(FEEDS, CONCURRENCY, async feed => {
   const push = items => { for (const it of items) all.push({ ...it, source: feed.id, at: toBeijingTime(it.atRaw) }); };
   const hit = cacheRead(feed.id);
   const ageMin = hit ? Math.round((Date.now() - hit.at) / 60000) : 0;
@@ -357,7 +386,7 @@ const discoveryFlag = String(args['discovery-provider'] ?? '').toLowerCase();
 const discoveryFirst = discoveryFlag === 'bing' || discoveryFlag === 'gnews'
   ? discoveryFlag
   : (settings.searchProvider === 'bing' ? 'bing' : 'gnews');
-const bingJobs = bingQueries.map(async q => {
+const bingJobs = archiveStat.skippedLive ? [] : bingQueries.map(async q => {
   const push = (items, provider) => {
     discoveryProviders.add(provider);
     for (const it of items) { all.push({ ...it, atRaw: it.at, title: it.title }); discoveryItems.push(it); }
@@ -442,8 +471,13 @@ for (const it of windowed) {
   if (tkey && titleSeen.has(tkey)) { dupTitles++; continue; }
   if (tkey) titleSeen.set(tkey, it.url);
   uniqueItems.push(it);
-  const hay = `${it.title} ${it.desc}`;
-  const hit = Object.entries(BOARD_RULES).filter(([, res]) => res.some(re => re.test(hay))).map(([b]) => b);
+  // 标题优先：标题本身就是最强的主题信号。标题没命中才看摘要兜底——
+  // 否则摘要里一个词就能把标题已经点明的板抢走（IBM 量子计算机被摘要
+  // 里的「算力」吸进国内 AI；OpenAI/Anthropic 的融资新闻被摘要里的
+  // 「AI 公司/支出」吸进国内 AI）。多命中时仍按板序取第一块。
+  const matchBoards = hay => Object.entries(BOARD_RULES).filter(([, res]) => res.some(re => re.test(hay))).map(([b]) => b);
+  const titleHit = matchBoards(it.title ?? '');
+  const hit = titleHit.length ? titleHit : matchBoards(`${it.title} ${it.desc}`);
   if (!hit.length) { others.push(it); continue; }
   // 只进优先级最高的板（其它命中记为 alsoIn，便于人工判断是否归错）
   if (hit.length > 1) it.alsoIn = hit.slice(1);
@@ -524,6 +558,7 @@ const payload = {
     dupTitlesDropped: dupTitles,
     cacheHits,
     staleHits,
+    archive: archiveStat,
     trippedFeeds: tripped,
     skippedExtraFeeds: skippedExtra,
     boardCounts: Object.fromEntries(Object.entries(boards).map(([b, v]) => [b, v.length])),

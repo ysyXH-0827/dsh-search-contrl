@@ -88,8 +88,10 @@ uniq.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')));
 const buckets = new Map(BOARD_RULES.map(([name]) => [name, []]));
 const others = [];
 for (const it of uniq) {
-  const hay = `${it.title ?? ''} ${it.desc ?? ''}`;
-  const hit = BOARD_RULES.find(([, res]) => res.some(re => re.test(hay)));
+  // 与 daily-collect 同款标题优先：标题命中才看摘要兜底，避免摘要里的
+  // 词把标题已点明的板抢走（见 daily-collect 的注释）。
+  const matchBoard = hay => BOARD_RULES.find(([, res]) => res.some(re => re.test(hay)));
+  const hit = matchBoard(it.title ?? '') ?? matchBoard(`${it.title ?? ''} ${it.desc ?? ''}`);
   if (hit) buckets.get(hit[0]).push(it);
   else others.push(it);
 }

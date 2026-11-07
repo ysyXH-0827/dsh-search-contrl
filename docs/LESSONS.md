@@ -36,6 +36,7 @@
 | 输出体积虚高一倍 | pwsh 的 `>` 重定向写成 UTF-16LE，字节数 ≠ 字符数 | 量输出用字符数（node 读文件取 `.length`），不要比重定向字节 |
 | 采集脚本默认吐整份 JSON，白烧 10× token | 「想看一眼」和「要喂下游」用同一个默认输出，模型读的是 86,966 字符里那 8,614 字符的精华 | 默认输出紧凑摘要，全量改显式 `--json`/`--out`（实测 10.1× 差距） |
 | 同一窗口重跑反复压源 | 采集没有缓存层，每次整理都重抓 14 个源（还容易撞 429） | 源结果落 `scripts/.cache/feeds/`（TTL 10 min），失败回退 24h 旧缓存并标注原因 |
+| 隔天重跑丢条目（102 → 95） | RSS 只留最近 20–60 条（如 IT之家 60 条），早段条目随新条目涌入滑出窗口；采集只认 RSS 当下窗口，从不读自己写的归档 | `daily-collect --from-archive` 先读 `reports/_data/archive/` 快照：整窗覆盖跳过现抓，部分覆盖现抓 + 归档合并；快照按主题核对，对不上直接跳过（`lib/archive-store.js`） |
 | `skill` 工具加载失败 `loaded skill "dsh-search-contrl" source must be a string`，agent 改读 lib/index.js 原文（2026-11-07 实跑） | 技能注册对象缺 `source` 字段；DSH 要求 SkillDefinition.source 是字符串（来源桶），`content` 不能代替它 | 注册时加 `source: 'runtime'`（运行时内嵌技能的来源桶）；`scripts/test-skill-registration.mjs` 锁死该字段与合法桶值 |
 
 ## 三、性能基线（实测，随环境波动取区间）

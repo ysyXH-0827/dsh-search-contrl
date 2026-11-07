@@ -136,7 +136,38 @@ check('the former technology feeds live inside presets, not in the default path'
     'energy reuses the auto preset electrek feed object, it does not duplicate it',
   );
   assert.equal(byId('tech').feeds.find(feed => feed.id === 'ithome').url, 'https://www.ithome.com/rss/');
-  assert.equal(Object.keys(byId('tech').boards).length, 9);
+  assert.equal(Object.keys(byId('tech').boards).length, 13);
+  assert.deepEqual(Object.keys(byId('tech').boards).slice(9), ['软件与系统', '互联网公司', '消费电子', '游戏电竞']);
+});
+
+check('tech boards classify the titles the old rules dropped to others', () => {
+  // 2026-11-07 实跑：旧规则 48/97 未归类，新规则 7/97。归类按标题优先、
+  // 摘要兜底的两段式（与 daily-collect / archive-digest 的实现一致），
+  // 不能只拼 title + desc——摘要里的词会把标题已点明的板抢走。
+  const boards = boardsForPreset(listTopicPresets().find(item => item.id === 'tech'));
+  const byHay = hay => Object.entries(boards).find(([, res]) => res.some(re => re.test(hay)))?.[0];
+  const classify = (title, desc = '') => byHay(title) ?? byHay(`${title} ${desc}`) ?? 'others';
+  assert.equal(classify('AI 编程进入“通话时代”：Cursor 智能体可实时语音协作'), '国内AI');
+  assert.equal(classify('All the latest updates on AI data centers'), '国际AI');
+  assert.equal(classify('50系突然疯涨，买不起显卡，年轻人又挤进网吧包夜了'), '芯片半导体');
+  assert.equal(classify('理想 Mega 新版本 MPV 谍照疑曝光，车头缩短、前三角窗加大'), '国内车型');
+  assert.equal(classify('中国第 43 次南极考察起航，“雪龙”号等三船共同保障'), '航天与科学');
+  assert.equal(classify('微软发布 Win11 多预览版：改进 Windows Hello 登录体验'), '软件与系统');
+  assert.equal(classify('腾讯旗下搜狗问问今日正式停运，曾拥有过亿用户'), '互联网公司');
+  assert.equal(classify('索尼官宣因生产问题延迟发售 PULSE Elevate 音箱'), '消费电子');
+  assert.equal(classify('卫冕冠军 T1 3:1 战胜 KC 跻身《英雄联盟》S16 四强'), '游戏电竞');
+  assert.equal(classify('何立峰与美国财政部长贝森特、贸易代表格里尔举行视频通话'), '产业政策');
+  assert.equal(classify('Hundreds of Artex AI hacking tools found publicly exposed to the web'), '国际AI');
+  // 英文里的 video 不能把条目吸进软件与系统：IDE 只认独立单词。
+  assert.equal(classify('Amazon is now making a Melania Trump TV series'), 'others');
+  // 标题优先：摘要里的词不能抢走标题已点明的板（2026-11-07 实跑的
+  // 5 条错归回放；算力已从国内 AI 拿掉，量子故事不再被它偷走）。
+  assert.equal(classify('刷新算力巅峰：IBM 在美国芝加哥揭幕其最强量子计算机', '已在芝加哥海德公园实验室投运 IBM Quantum System Two 量子计算机'), '航天与科学');
+  assert.equal(classify('谷歌发布新一代视频生成模型', '谷歌宣布推出AI视频生成模型Gemini Omni 1.2 Flash，支持原生生成最长15秒的视频'), '国际AI');
+  assert.equal(classify('“史上最大 IPO”遇挑战：Anthropic 上市估值存分歧，1.5 万亿美元仍被嫌贵', '报道称 AI 公司 Anthropic 的首次公开募股（IPO）计划面临投资者估值质疑'), '国际AI');
+  assert.equal(classify('Anthropic拟于下周启动IPO路演', '投资者对亚马逊和谷歌公布的巨额AI支出计划，以及民主党在中期选举中的压倒性胜利作出了反应'), '国际AI');
+  assert.equal(classify('OpenAI完成110亿美元新融资，估值1.25万亿美元，软银、红杉资本等参投', '在推迟了首次公开募股（IPO）计划后，这家AI开发商已就一轮大额融资洽谈了一个多月'), '国际AI');
+  assert.equal(classify('OpenAI：将继续推进其美国数据中心扩张计划', '尽管本周民主党中期选举引发了对AI基础设施进行更严格审查的担忧，但公司将继续推进其美国数据中心扩张计划'), '国际AI');
 });
 
 check('slow feeds are marked extra-tier so a daily run never pays their timeout', () => {
