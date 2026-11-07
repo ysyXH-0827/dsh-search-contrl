@@ -2,7 +2,7 @@
 
 **给 DeepSeek Harness 用的「主题搜索 + 中文报告」技能/插件。3.0 起不再默认科技：先问你要什么主题，再按问题定搜索源。**
 
-`3.0.2` · DSH `>= 0.2.0` · Node.js `>= 20` · MIT
+`3.0.3` · DSH `>= 0.2.0` · Node.js `>= 20` · MIT
 
 ## 它是什么
 
@@ -72,7 +72,7 @@ Host 侧配置（可选，改完需重启 profile）：
 
 升级：`pnpm add dsh-search-contrl@latest` 后重启 DSH。回退到稳定版：`pnpm add dsh-search-contrl@2.2.18`。卸载：从 `dependencies` 和 `bundles` 移除，`pnpm install`，重启；设置在 `~/.dsh/plugin-data/dsh-search-contrl/`，需要时手动删。
 
-> `3.0.2` 是正式版：定向轮跟发现轮走同一免费通道（Google News 优先、Bing 备用），免费通道各有更小的超时预算，10 个预设里 9 个带 RSS（时政政策暂无可用源），search 动作可控 token。想留在旧稳定版：`pnpm add dsh-search-contrl@2.2.18`。
+> `3.0.3` 是正式版：技能注册补 `source: 'runtime'`，`skill` 工具可正常加载（3.0.2 会报 `source must be a string`）；其余与 3.0.2 相同。想留在旧稳定版：`pnpm add dsh-search-contrl@2.2.18`。
 
 ## 报告长什么样
 
