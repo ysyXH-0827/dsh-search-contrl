@@ -173,6 +173,14 @@ assert.ok(
   'the card must detect a Host that is still running a pre-2.2.0 plugin'
 );
 assert.ok(
+  source.includes('const savedSites = Array.isArray(masked?.sites)'),
+  'the cookie panel must read per-site counts from masked.sites, not the aggregate counts'
+);
+assert.ok(
+  source.includes('setInterval(() => { refreshCookie(); }, 2000)'),
+  'the cookie panel must poll while a capture is waiting'
+);
+assert.ok(
   source.includes('被正在运行的旧版服务端丢弃了'),
   'the card must explain a delivery save that the old Host dropped, not snap back silently'
 );

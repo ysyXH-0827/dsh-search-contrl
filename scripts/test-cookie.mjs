@@ -56,6 +56,13 @@ await test('hasLoginCookies requires every required name', () => {
   assert.equal(hasLoginCookies(bili, [sessionCookie('bili_jct')]), false);
 });
 
+await test('a Weibo guest SUB does not count as a login; ALF does', () => {
+  const weibo = cookieSite('weibo');
+  const guest = [sessionCookie('SUB', 'guest', '.weibo.com'), sessionCookie('SUBP', 'guest', '.weibo.com')];
+  assert.equal(hasLoginCookies(weibo, guest), false);
+  assert.equal(hasLoginCookies(weibo, [...guest, sessionCookie('ALF', 'login', '.weibo.com')]), true);
+});
+
 await test('saveSiteCookies refuses an incomplete login', () => {
   const dir = tempDir();
   const saved = saveSiteCookies(dir, 'bilibili', [sessionCookie('SESSDATA')], { now });
@@ -81,6 +88,24 @@ await test('cookieHeader builds a request header only for stored sites', () => {
   assert.equal(cookieHeader(dir, 'bilibili', { now }), 'SESSDATA=abc123');
   assert.equal(cookieHeader(dir, 'zhihu', { now }), '');
   assert.equal(cookieHeader(dir, 'unknown', { now }), '');
+});
+
+await test('cookieHeader refuses a stored jar whose login no longer proves', () => {
+  const dir = tempDir();
+  fs.writeFileSync(path.join(dir, 'cookies.json'), JSON.stringify({
+    version: 1,
+    updatedAt: new Date(now).toISOString(),
+    sites: {
+      weibo: {
+        site: 'weibo',
+        domain: 'weibo.com',
+        savedAt: new Date(now).toISOString(),
+        cookies: [sessionCookie('SUB', 'guest', '.weibo.com'), sessionCookie('SUBP', 'guest', '.weibo.com')],
+        loggedIn: true,
+      },
+    },
+  }), 'utf8');
+  assert.equal(cookieHeader(dir, 'weibo', { now }), '');
 });
 
 await test('clearCookies removes one site or all sites', () => {
