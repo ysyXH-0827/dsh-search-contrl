@@ -208,11 +208,14 @@ function isIndexLike(hit) {
   if (parsed.pathname === '' || parsed.pathname === '/' || parsed.pathname === '/index.html') return true;
   const params = parsed.search.toLowerCase();
   if (params.includes('redirect=') || params.includes('url=http')) return true;
-  return /(首页|_新浪网|官方网站|官网|-s*汽车报价.*资讯)$/.test(hit.title);
+  return /(首页|_新浪网|官方网站|官网|\s*汽车报价.*资讯)$/.test(hit.title);
 }
 
 async function bingRss(query) {
-  const q = encodeURIComponent(`${query} ${date}`);
+  // No bare date in the query: a date string is just another search term to
+  // Bing and pulls months-old pages (the same trap google-news.js warns
+  // about). Freshness is enforced downstream by the pubDate window filter.
+  const q = encodeURIComponent(query);
   const url = `https://www.bing.com/search?q=${q}&format=rss&mkt=zh-CN&setlang=zh-CN`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 12000);

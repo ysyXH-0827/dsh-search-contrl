@@ -2,7 +2,7 @@
 
 **给 DeepSeek Harness 用的「主题搜索 + 中文报告」技能/插件。3.0 起不再默认科技：先问你要什么主题，再按问题定搜索源。**
 
-`3.0.0` · DSH `>= 0.2.0` · Node.js `>= 20` · MIT
+`3.0.2` · DSH `>= 0.2.0` · Node.js `>= 20` · MIT
 
 ## 它是什么
 
@@ -31,7 +31,7 @@ pnpm add dsh-search-contrl
 
 - **命中预设**：用预设的 RSS、域名、检索词和板块。内置 10 个预设：科技 / 财经 / 汽车 / 体育 / 娱乐 / 医疗健康 / 游戏 / 时政政策 / 能源 / 科学。
 - **没命中预设**：按用户问题动态定。先拼 3 条发现查询（`关键词 最新` / `关键词 发布 公告` / `关键词 官网`），看哪些域名真的答了，再把答了的域名（最多 4 个）当作本次的源，用 `site:域名 关键词` 定向搜。没答过的域名不进源清单。
-- **费用**：动态发现全程只走免费 Bing 通道，0 Tavily credit。Tavily 是可选项：有 Key 时才用于 AI 摘要和正文提取，`search` 每次 1 credit，`extract` 每 5 个成功 URL 1 credit；没 Key 也能出报告，只是正文提取受限。
+- **费用**：动态发现全程只走免费通道（Google News RSS 优先，Bing 备用），0 Tavily credit。Tavily 是可选项：有 Key 时才用于 AI 摘要和正文提取，`search` 每次 1 credit，`extract` 每 5 个成功 URL 1 credit；没 Key 也能出报告，只是正文提取受限。
 
 详细说明见 [docs/GUIDE.md](docs/GUIDE.md)。
 
@@ -44,7 +44,7 @@ pnpm add dsh-search-contrl
 | 报告标题 | 模板 `{主题}{类型}｜{日期}`，可改，实时预览，上限 120 字 |
 | 输出方式 | 只给文件 / 只在聊天中 / 文件 + 聊天；表格或分条；事件密度 large / medium / small |
 | 主题 | 名称、预设、关键词、域名；没配主题时先问主题再检索 |
-| 搜索源 | Bing 免费通道（默认）、Tavily（需 Key）、指定站点（`site:`） |
+| 搜索源 | Google News 免费通道（默认）、Bing 免费通道、Tavily（需 Key）、指定站点（`site:`） |
 | 博主 | 粘贴主页链接，15 个平台自动识别，可一次读多个 |
 | 要点与字数 | 显示链接/要点，微博默认 20 字、B 站默认 50 字 |
 | 登录 Cookie | 本机浏览器登录一次捕获，Cookie 只存本机，不上传 |
@@ -64,7 +64,7 @@ Host 侧配置（可选，改完需重启 profile）：
 - id: search-contrl
   name: dsh-search-contrl
   config:
-    tavilyApiKey: ""   # 留空 = 只用免费 Bing；动态发现永远不花 Tavily credit
+    tavilyApiKey: ""   # 留空 = 只用免费 Bing / Google News；动态发现永远不花 Tavily credit
     searchDepth: basic
     maxResults: 8
     timeoutMs: 45000
@@ -72,7 +72,7 @@ Host 侧配置（可选，改完需重启 profile）：
 
 升级：`pnpm add dsh-search-contrl@latest` 后重启 DSH。回退到稳定版：`pnpm add dsh-search-contrl@2.2.18`。卸载：从 `dependencies` 和 `bundles` 移除，`pnpm install`，重启；设置在 `~/.dsh/plugin-data/dsh-search-contrl/`，需要时手动删。
 
-> `3.0.0` 是正式版：动态发现默认走 Google News RSS（Bing 备用），搜索源可在设置页切换，RSS 带熔断与缓存优化。想留在旧稳定版：`pnpm add dsh-search-contrl@2.2.18`。
+> `3.0.2` 是正式版：定向轮跟发现轮走同一免费通道（Google News 优先、Bing 备用），免费通道各有更小的超时预算，10 个预设里 9 个带 RSS（时政政策暂无可用源），search 动作可控 token。想留在旧稳定版：`pnpm add dsh-search-contrl@2.2.18`。
 
 ## 报告长什么样
 
@@ -112,7 +112,7 @@ Host 侧配置（可选，改完需重启 profile）：
 
 **主题匹配到了错的预设？** 在「主题 → 预设」里手工指定。
 
-**检索太慢？** 动态发现和采集默认走免费 Bing；Tavily `advanced` 会更慢更贵。采集侧可把 `--concurrency` 调到 6–8。
+**检索太慢？** 动态发现默认走 Google News RSS（Bing 备用）；Tavily `advanced` 会更慢更贵。采集侧可把 `--concurrency` 调到 6–8。
 
 **Cookie 点了没反应？** 确认浏览器能正常登录该站点；企业网络/代理下捕获窗口可能连不上，先关代理再试。
 
@@ -120,7 +120,7 @@ Host 侧配置（可选，改完需重启 profile）：
 
 ```bash
 pnpm run check    # 全量 node --check
-pnpm test         # 9 套离线测试，112 条断言
+pnpm test         # 9 套离线测试，108 条断言
 pnpm run prepack  # 打包前自检：lib 语法 + client bundle + patch 存在
 ```
 

@@ -118,10 +118,23 @@ check('the former technology feeds live inside presets, not in the default path'
   assert.equal(byId('tech').feeds.length, 10);
   assert.equal(byId('auto').feeds.length, 2);
   assert.equal(byId('science').feeds.length, 2);
-  assert.equal(byId('finance').feeds.length, 0, 'no built-in finance feed yet; it must search instead');
+  assert.equal(byId('finance').feeds.length, 1);
+  assert.equal(byId('sports').feeds.length, 2);
+  assert.equal(byId('entertainment').feeds.length, 2);
+  assert.equal(byId('health').feeds.length, 2);
+  assert.equal(byId('game').feeds.length, 1);
+  assert.equal(byId('energy').feeds.length, 2);
+  assert.equal(byId('policy').feeds.length, 0, 'no verified policy feed yet; it must search instead');
   const urls = presets.flatMap(item => item.feeds.map(feed => feed.url));
-  assert.equal(urls.length, 14);
-  assert.equal(new Set(urls).size, 14, 'a feed may belong to one preset only');
+  assert.equal(urls.length, 24);
+  // Electrek is deliberately shared between the auto and energy presets
+  // (one feed, two topics), so unique URLs are one fewer than entries.
+  assert.equal(new Set(urls).size, 23);
+  assert.equal(
+    byId('energy').feeds.find(feed => feed.id === 'electrek').url,
+    byId('auto').feeds.find(feed => feed.id === 'electrek').url,
+    'energy reuses the auto preset electrek feed object, it does not duplicate it',
+  );
   assert.equal(byId('tech').feeds.find(feed => feed.id === 'ithome').url, 'https://www.ithome.com/rss/');
   assert.equal(Object.keys(byId('tech').boards).length, 9);
 });

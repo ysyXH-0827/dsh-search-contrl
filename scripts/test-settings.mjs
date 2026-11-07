@@ -322,6 +322,18 @@ await test('domain filter keeps the domain and its subdomains only', async () =>
   );
   assert.equal(kept.length, 2);
   assert.equal(filterResultsByDomain([{ url: 'https://x.com/1' }], []).length, 1, 'no domains means no filtering');
+  // Google News links are news.google.com redirects: the URL host never
+  // matches, so the outlet-derived publisherDomain is the scope signal.
+  const gnews = filterResultsByDomain(
+    [
+      { url: 'https://news.google.com/rss/articles/AAA', publisherDomain: 'cls.cn' },
+      { url: 'https://news.google.com/rss/articles/BBB', publisherDomain: 'sina.com.cn' },
+      { url: 'https://news.google.com/rss/articles/CCC' },
+    ],
+    ['cls.cn']
+  );
+  assert.equal(gnews.length, 1);
+  assert.equal(gnews[0].publisherDomain, 'cls.cn');
 });
 
 
