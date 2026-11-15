@@ -164,6 +164,19 @@ check('tech boards classify the titles the old rules dropped to others', () => {
   // 5 条错归回放；算力已从国内 AI 拿掉，量子故事不再被它偷走）。
   assert.equal(classify('刷新算力巅峰：IBM 在美国芝加哥揭幕其最强量子计算机', '已在芝加哥海德公园实验室投运 IBM Quantum System Two 量子计算机'), '航天与科学');
   assert.equal(classify('谷歌发布新一代视频生成模型', '谷歌宣布推出AI视频生成模型Gemini Omni 1.2 Flash，支持原生生成最长15秒的视频'), '国际AI');
+  // 国际厂商名优先：标题同时含 Anthropic/Claude/OpenAI/ChatGPT/Gemini 等
+  // 国际 AI 厂商名与「智能体 / AI 智能体」时，不能被国内 AI 的泛化词吸走。
+  // 2026-11-15 复现：以下四条修前都归入国内 AI（国际 AI 只在 alsoIn 里）。
+  assert.equal(classify('Anthropic 的 Claude AI 智能体研究取得新进展'), '国际AI');
+  assert.equal(classify('Claude 智能体可独立完成多步编程任务'), '国际AI');
+  assert.equal(classify('OpenAI 发布 ChatGPT 智能体，可自动处理多步任务'), '国际AI');
+  assert.equal(classify('Gemini 智能体接入更多 Google 产品'), '国际AI');
+  // 厂商名不必在标题开头，排除规则要看整条标题。
+  assert.equal(classify('智能体大战升级：OpenAI 发布新工具'), '国际AI');
+  // 反过来，没有厂商名的中文「智能体」仍归国内 AI，排除规则不能误伤。
+  assert.equal(classify('国产智能体框架发布新版本'), '国内AI');
+  // 厂商名优先也要盖住国内 AI 的第一条规则（大模型/模型发布），不只「智能体」。
+  assert.equal(classify('Anthropic 发布 Claude 大模型更新'), '国际AI');
   assert.equal(classify('“史上最大 IPO”遇挑战：Anthropic 上市估值存分歧，1.5 万亿美元仍被嫌贵', '报道称 AI 公司 Anthropic 的首次公开募股（IPO）计划面临投资者估值质疑'), '国际AI');
   assert.equal(classify('Anthropic拟于下周启动IPO路演', '投资者对亚马逊和谷歌公布的巨额AI支出计划，以及民主党在中期选举中的压倒性胜利作出了反应'), '国际AI');
   assert.equal(classify('OpenAI完成110亿美元新融资，估值1.25万亿美元，软银、红杉资本等参投', '在推迟了首次公开募股（IPO）计划后，这家AI开发商已就一轮大额融资洽谈了一个多月'), '国际AI');

@@ -2,7 +2,7 @@
 
 **给 DeepSeek Harness 用的「主题搜索 + 中文报告」技能/插件。3.0 起不再默认科技：先问你要什么主题，再按问题定搜索源。**
 
-`3.0.4` · DSH `>= 0.2.0` · Node.js `>= 20` · MIT
+`3.0.5` · DSH `>= 0.2.0` · Node.js `>= 20` · MIT
 
 ## 它是什么
 
@@ -72,7 +72,7 @@ Host 侧配置（可选，改完需重启 profile）：
 
 升级：`pnpm add dsh-search-contrl@latest` 后重启 DSH。回退到稳定版：`pnpm add dsh-search-contrl@2.2.18`。卸载：从 `dependencies` 和 `bundles` 移除，`pnpm install`，重启；设置在 `~/.dsh/plugin-data/dsh-search-contrl/`，需要时手动删。
 
-> `3.0.4` 是正式版：重跑过去某天可用 `--from-archive` 优先读归档快照，不再受 RSS 只留最新 20–60 条限制；科技板块 9→13 个、归类改标题优先，未归类从约 50% 压到 7%。想留在旧稳定版：`pnpm add dsh-search-contrl@2.2.18`。
+> `3.0.5` 是正式版：修复科技板块错归——标题同时含 Anthropic/Claude/OpenAI/ChatGPT/Gemini 等国际厂商名与「智能体」时，不再被国内 AI 抢走（厂商名抽成常量，国内 AI 规则先排除）；重跑过去某天可用 `--from-archive` 优先读归档快照；科技板块 13 个、归类标题优先。想留在旧稳定版：`pnpm add dsh-search-contrl@2.2.18`。
 
 ## 报告长什么样
 
